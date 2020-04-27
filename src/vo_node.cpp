@@ -43,6 +43,9 @@ typedef struct keyframe_header {
 static cv::Mat left_pmat;
 static cv::Mat right_pmat;
 
+static cv::Mat rvec;
+static cv::Mat tvec;
+
 // KITTI sequence 00
 /*
 static const double focal_length = 7.18856e+02;
@@ -141,12 +144,17 @@ void handle_images(const sensor_msgs::ImageConstPtr& left_msg,
   vector<cv::KeyPoint> left_keypoints;
   vector<cv::Point2f> left_features_2d;
 
-  /*
   // Images in Gazebo are especially noisy if you don't blur
+  /*
   cv::GaussianBlur(left_ptr->image, left_ptr->image, cv::Size(3, 3), 1);
   cv::GaussianBlur(right_ptr->image, right_ptr->image, cv::Size(3, 3), 1);
   */
-  cv::FAST(left_ptr->image, left_keypoints, 40);
+  cv::FAST(left_ptr->image, left_keypoints, 40); // better for KITTI
+  //cv::FAST(left_ptr->image, left_keypoints, 10); // better for d435i in snake bags
+
+  if (left_keypoints.size() < 4) {
+    return;
+  }
   cv::KeyPoint::convert(left_keypoints, left_features_2d);
 
   /*
@@ -171,6 +179,9 @@ void handle_images(const sensor_msgs::ImageConstPtr& left_msg,
     shared_ptr<keyframe_t> new_keyframe(keyframe_ptr);
     
     ba_window.push(new_keyframe);
+
+    tvec = cv::Mat::zeros(3, 1, CV_32F);
+    rvec = cv::Mat::zeros(3, 1, CV_32F);
 
     return;
   }
@@ -216,13 +227,11 @@ void handle_images(const sensor_msgs::ImageConstPtr& left_msg,
                      right_ptr->image);
 
   // Use PnP to get transform between last keyframe and this one
-  cv::Mat rvec;
-  cv::Mat tvec;
   solvePnPRansac(last_keyframe->features_3d,
                  tracked_features,
                  left_pmat.colRange(0, 3),
                  cv::Mat::zeros(4, 1, CV_32F),
-                 rvec, tvec);
+                 rvec, tvec, true);
 
   cv::Mat rmat;
   cv::Rodrigues(rvec, rmat);
@@ -250,8 +259,8 @@ int main(int argc, char **argv) {
   message_filters::Subscriber<sensor_msgs::Image> left_sub(n, "/leftImage", 3);
   message_filters::Subscriber<sensor_msgs::Image> right_sub(n, "/rightImage", 3);
 
-  /*
   // d435i topic
+  /*
   message_filters::Subscriber<sensor_msgs::Image> left_sub(n, "/camera/infra1/image_rect_raw", 3);
   message_filters::Subscriber<sensor_msgs::Image> right_sub(n, "/camera/infra2/image_rect_raw", 3);
   */
@@ -318,10 +327,11 @@ int main(int argc, char **argv) {
       path.header.stamp = gpose.header.stamp;
       path_pub.publish(path);
 
+      // For displaying features in rviz
       /*
       visualization_msgs::Marker marker;
       marker.header.stamp = pose.header.stamp;
-      marker.header.frame_id = "marker_frame";
+      marker.header.frame_id = "world";
       marker.ns = "vo_node";
       marker.action = visualization_msgs::Marker::ADD;
       marker.pose.position.x = 0;
