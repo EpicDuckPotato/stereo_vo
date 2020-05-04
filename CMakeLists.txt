@@ -23,7 +23,7 @@ find_package(catkin REQUIRED COMPONENTS
 )
 
 ## System dependencies are found with CMake's conventions
-# find_package(Boost REQUIRED COMPONENTS system)
+find_package(Ceres REQUIRED)
 
 
 ## Uncomment this if the package has a setup.py. This macro ensures
@@ -125,14 +125,15 @@ catkin_package(
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
 include_directories(
-# include
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${catkin_INCLUDE_DIRS}
+  ${CERES_INCLUDE_DIRS}
 )
 
 ## Declare a C++ library
-# add_library(${PROJECT_NAME}
-#   src/${PROJECT_NAME}/vo_practice.cpp
-# )
+add_library(bundle_adjustment OBJECT
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/bundle_adjuster.cpp
+)
 
 ## Add cmake target dependencies of the library
 ## as an example, code may need to be generated before libraries
@@ -142,8 +143,8 @@ include_directories(
 ## Declare a C++ executable
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
-add_executable(vo_node src/vo_node.cpp)
-target_link_libraries(vo_node ${catkin_LIBRARIES})
+add_executable(vo_node src/vo_node.cpp $<TARGET_OBJECTS:bundle_adjustment>)
+target_link_libraries(vo_node ${catkin_LIBRARIES} ${CERES_LIBRARIES})
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
