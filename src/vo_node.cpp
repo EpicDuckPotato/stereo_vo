@@ -16,6 +16,7 @@
 #include <geometry_msgs/Point.h>
 #include <nav_msgs/Path.h>
 #include <geometry_msgs/PoseStamped.h>
+#include <memory>
 
 using namespace Eigen;
 using namespace std;
@@ -30,6 +31,11 @@ struct Keyframe {
   cv::Mat image; // for optical flow
   vector<cv::Point2f> features_2d; // for optical flow
   vector<cv::Point3f> features_3d; // for PnP
+
+  Keyframe(Vector3f position, Quaternionf orientation, cv::Mat image,
+           vector<cv::Point2f> features_2d, vector<cv::Point3f> features_3d) :
+           position(position), orientation(orientation), image(image),
+           features_2d(features_2d), features_3d(features_3d) {}
 };
 
 static cv::Mat left_pmat;
@@ -84,9 +90,8 @@ static const double cx = 400.5;
 static const double cy = 400.5;
 static const double stereo_sep = 0.07;
 
-static const size_t window_size = 2; 
-
-static queue<shared_ptr<Keyframe>> ba_window;
+static shared_ptr<Keyframe> last_keyframe;
+static bool got_first_image = false;
 
 // Computes the 3d positions of the features
 // REQUIRES: features_3d.size() == features_2d.size()
@@ -167,18 +172,16 @@ void handle_images(const sensor_msgs::ImageConstPtr& left_msg,
   */
 
   // If we don't have any keyframes, make this the first one
-  if (ba_window.size() == 0) {
+  if (!got_first_image) {
+    got_first_image = true;
     vector<cv::Point3f> features_3d(left_features_2d.size());
     triangulate_stereo(features_3d, left_features_2d, left_ptr->image, right_ptr->image);
 
-    Keyframe *keyframe_ptr = new Keyframe{Vector3f::Zero(),
-                                              Quaternionf::Identity(),
-                                              left_ptr->image,
-                                              left_features_2d,
-                                              features_3d};
-    shared_ptr<Keyframe> new_keyframe(keyframe_ptr);
-    
-    ba_window.push(new_keyframe);
+    last_keyframe = make_shared<Keyframe>(Vector3f::Zero(),
+                                          Quaternionf::Identity(),
+                                          left_ptr->image,
+                                          left_features_2d,
+                                          features_3d);
 
     tvec = cv::Mat::zeros(3, 1, CV_32F);
     rvec = cv::Mat::zeros(3, 1, CV_32F);
@@ -187,7 +190,6 @@ void handle_images(const sensor_msgs::ImageConstPtr& left_msg,
   }
 
   // Track features between last keyframe and current frame
-  shared_ptr<Keyframe> last_keyframe = ba_window.back();
   vector<uchar> status;
   vector<float> err;
   vector<cv::Point2f> tracked_features;
@@ -213,12 +215,11 @@ void handle_images(const sensor_msgs::ImageConstPtr& left_msg,
 
   // Allocate memory for new keyframe
   num_features = left_features_2d.size();
-  Keyframe *keyframe_ptr = new Keyframe{Vector3f::Zero(),
-                                            Quaternionf::Identity(),
-                                            left_ptr->image,
-                                            left_features_2d,
-                                            vector<cv::Point3f>(num_features)};
-  shared_ptr<Keyframe> new_keyframe(keyframe_ptr);
+  shared_ptr<Keyframe> new_keyframe  = make_shared<Keyframe>(Vector3f::Zero(),
+                                                             Quaternionf::Identity(),
+                                                             left_ptr->image,
+                                                             left_features_2d,
+                                                             vector<cv::Point3f>(num_features));
     
   // Populate 3d features (used when processing next keyframe)
   triangulate_stereo(new_keyframe->features_3d,
@@ -227,7 +228,6 @@ void handle_images(const sensor_msgs::ImageConstPtr& left_msg,
                      right_ptr->image);
 
   // Use PnP to get transform between last keyframe and this one
-  // TODO: remember to pick up the inliers and only use those for BA!
   solvePnPRansac(last_keyframe->features_3d,
                  tracked_features,
                  left_pmat.colRange(0, 3),
@@ -245,11 +245,7 @@ void handle_images(const sensor_msgs::ImageConstPtr& left_msg,
   new_keyframe->orientation = last_keyframe->orientation*rmat_eigen.transpose();
   new_keyframe->position = last_keyframe->position - last_keyframe->orientation*rmat_eigen.transpose()*tvec_eigen;
 
-  ba_window.push(new_keyframe);
-
-  if(ba_window.size() > window_size) {
-    ba_window.pop();
-  }
+  last_keyframe = new_keyframe;
 }
 
 int main(int argc, char **argv) {
@@ -298,18 +294,16 @@ int main(int argc, char **argv) {
 
   ros::Rate r(20);
   while (ros::ok()) {
-    if (ba_window.size() > 0) {
-      shared_ptr<Keyframe> keyframe = ba_window.back();
-
+    if (got_first_image) {
       geometry_msgs::TransformStamped pose;
-      pose.transform.rotation.w = keyframe->orientation.w();
-      pose.transform.rotation.x = keyframe->orientation.x();
-      pose.transform.rotation.y = keyframe->orientation.y();
-      pose.transform.rotation.z = keyframe->orientation.z();
+      pose.transform.rotation.w = last_keyframe->orientation.w();
+      pose.transform.rotation.x = last_keyframe->orientation.x();
+      pose.transform.rotation.y = last_keyframe->orientation.y();
+      pose.transform.rotation.z = last_keyframe->orientation.z();
 
-      pose.transform.translation.x = keyframe->position(0);
-      pose.transform.translation.y = keyframe->position(1);
-      pose.transform.translation.z = keyframe->position(2);
+      pose.transform.translation.x = last_keyframe->position(0);
+      pose.transform.translation.y = last_keyframe->position(1);
+      pose.transform.translation.z = last_keyframe->position(2);
 
       pose.header.stamp = ros::Time::now();
       pose.header.frame_id = "world";
@@ -318,14 +312,14 @@ int main(int argc, char **argv) {
       br.sendTransform(pose);
 
       geometry_msgs::PoseStamped gpose;
-      gpose.pose.orientation.w = keyframe->orientation.w();
-      gpose.pose.orientation.x = keyframe->orientation.x();
-      gpose.pose.orientation.y = keyframe->orientation.y();
-      gpose.pose.orientation.z = keyframe->orientation.z();
+      gpose.pose.orientation.w = last_keyframe->orientation.w();
+      gpose.pose.orientation.x = last_keyframe->orientation.x();
+      gpose.pose.orientation.y = last_keyframe->orientation.y();
+      gpose.pose.orientation.z = last_keyframe->orientation.z();
 
-      gpose.pose.position.x = keyframe->position(0);
-      gpose.pose.position.y = keyframe->position(1);
-      gpose.pose.position.z = keyframe->position(2);
+      gpose.pose.position.x = last_keyframe->position(0);
+      gpose.pose.position.y = last_keyframe->position(1);
+      gpose.pose.position.z = last_keyframe->position(2);
 
       gpose.header.stamp = pose.header.stamp;
       gpose.header.frame_id = "vo_pose";
@@ -354,7 +348,7 @@ int main(int argc, char **argv) {
       marker.color.g = 1.0f;
       marker.color.a = 1.0;
 
-      size_t num_features = keyframe->features_3d.size();
+      size_t num_features = last_keyframe->features_3d.size();
       for (size_t i = 0; i < num_features; ++i) {
         geometry_msgs::Point p;
         p.x = keyframe->features_3d[i].x;
