@@ -198,15 +198,24 @@ void handle_images(const sensor_msgs::ImageConstPtr& left_msg,
                            cv::TermCriteria(cv::TermCriteria::COUNT+cv::TermCriteria::EPS, 30, 0.01),
                            0, 1e-4);
 
+  vector<cv::Point2f> valid_tracked_features;
+  vector<cv::Point3f> valid_tracked_features_3d;
+
   // If average parallax is less than 10 pixels, don't use this frame as a keyframe
   float av_parallax;
   size_t num_features = tracked_features.size();
   for (size_t i = 0; i < num_features; i++) {
-    float dx = tracked_features[i].x - last_keyframe->features_2d[i].x;
-    float dy = tracked_features[i].y - last_keyframe->features_2d[i].y;
+    if (status[i]) {
+      valid_tracked_features.push_back(tracked_features[i]);
+      valid_tracked_features_3d.push_back(last_keyframe->features_3d[i]);
 
-    av_parallax += sqrt(dx*dx + dy*dy);
+      float dx = tracked_features[i].x - last_keyframe->features_2d[i].x;
+      float dy = tracked_features[i].y - last_keyframe->features_2d[i].y;
+      av_parallax += sqrt(dx*dx + dy*dy);
+    }
   }
+
+  num_features = valid_tracked_features.size();
   av_parallax /= num_features;
 
   if (av_parallax <= 20) {
@@ -228,8 +237,8 @@ void handle_images(const sensor_msgs::ImageConstPtr& left_msg,
                      right_ptr->image);
 
   // Use PnP to get transform between last keyframe and this one
-  solvePnPRansac(last_keyframe->features_3d,
-                 tracked_features,
+  solvePnPRansac(valid_tracked_features_3d,
+                 valid_tracked_features,
                  left_pmat.colRange(0, 3),
                  cv::Mat::zeros(4, 1, CV_32F),
                  rvec, tvec, true);
