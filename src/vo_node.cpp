@@ -131,11 +131,11 @@ void triangulate_stereo(vector<cv::Point3f>& features_3d,
     }
   }
 
+  num_features = matched_features_2d.size();
   cv::Mat points_homogeneous = cv::Mat::zeros(4, num_features, CV_32F);
 
   cv::triangulatePoints(left_pmat, right_pmat, matched_features_2d, right_features_2d, points_homogeneous);
 
-  num_features = matched_features_2d.size();
   for (size_t i = 0; i < num_features; i++) {
     points_homogeneous.colRange(i, i + 1) /= points_homogeneous.at<float>(3, i);
     features_3d.push_back(cv::Point3f(points_homogeneous.at<float>(0, i),
