@@ -12,11 +12,22 @@ struct Keyframe {
   Vector3f position; 
   AngleAxisf orientation; 
   cv::Mat image; 
-  cv::Mat left_pmat;
-  cv::Mat right_pmat;
   vector<cv::Point2f> features_2d; 
   vector<cv::Point3f> features_3d;
   vector<size_t> feature_ids;
+
+  Keyframe(Vector3f position, 
+           AngleAxisf orientation,
+           cv::Mat image,
+           vector<cv::Point2f> features_2d,
+           vector<cv::Point3f> features_3d,
+           vector<size_t> feature_ids) : 
+           position(position),
+           orientation(orientation),
+           image(image),
+           features_2d(features_2d),
+           features_3d(features_3d),
+           feature_ids(feature_ids) {}
 };
 
 // A variable representing a camera pose in the factor graph 
