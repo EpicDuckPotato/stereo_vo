@@ -45,12 +45,10 @@ static cv::Mat rvec;
 static cv::Mat tvec;
 
 // KITTI sequence 00
-/*
 static const double focal_length = 7.18856e+02;
 static const double cx = 6.071928e+02;
 static const double cy = 1.852157e+02;
 static const double stereo_sep = 0.537165718864418;
-*/
 
 // KITTI sequence 03
 /*
@@ -85,17 +83,21 @@ static const double stereo_sep = 0.07;
 */
 
 // Multisense
+/*
 static const double focal_length = 476.7030836014194;
 static const double cx = 400.5;
 static const double cy = 400.5;
 static const double stereo_sep = 0.07;
+*/
 
 static shared_ptr<Keyframe> last_keyframe;
 static bool got_first_image = false;
 
-// Computes the 3d positions of the features
-// REQUIRES: features_3d.size() == features_2d.size()
+// Computes the 3d positions of the features. matched_features_2d
+// contains all features from left_features_2d that could be triangulated
+// REQUIRES: features_3d.size() == 0 && matched_features_2d.size() == 0
 void triangulate_stereo(vector<cv::Point3f>& features_3d,
+                        vector<cv::Point2f>& matched_features_2d,
                         const vector<cv::Point2f>& left_features_2d,
                         const cv::Mat& left,
                         const cv::Mat& right) {
@@ -117,21 +119,28 @@ void triangulate_stereo(vector<cv::Point3f>& features_3d,
   disparity.convertTo(disparity, CV_32F, 1.0/16);
 
   size_t num_features = left_features_2d.size();
-  vector<cv::Point2f> right_features_2d(left_features_2d);
+
+  vector<cv::Point2f> right_features_2d;
   for (size_t i = 0; i < num_features; i++) {
-    right_features_2d[i].x += disparity.at<float>(left_features_2d[i].y,
-                                                  left_features_2d[i].x);
+    float disp = disparity.at<float>(left_features_2d[i].y,
+                                     left_features_2d[i].x);
+
+    if (disp > 0) {
+      matched_features_2d.push_back(left_features_2d[i]);
+      right_features_2d.push_back(left_features_2d[i] + cv::Point2f(disp, 0));
+    }
   }
 
   cv::Mat points_homogeneous = cv::Mat::zeros(4, num_features, CV_32F);
 
-  cv::triangulatePoints(left_pmat, right_pmat, left_features_2d, right_features_2d, points_homogeneous);
+  cv::triangulatePoints(left_pmat, right_pmat, matched_features_2d, right_features_2d, points_homogeneous);
 
+  num_features = matched_features_2d.size();
   for (size_t i = 0; i < num_features; i++) {
     points_homogeneous.colRange(i, i + 1) /= points_homogeneous.at<float>(3, i);
-    features_3d[i].x = points_homogeneous.at<float>(0, i);
-    features_3d[i].y = points_homogeneous.at<float>(1, i);
-    features_3d[i].z = points_homogeneous.at<float>(2, i);
+    features_3d.push_back(cv::Point3f(points_homogeneous.at<float>(0, i),
+                                      points_homogeneous.at<float>(1, i),
+                                      points_homogeneous.at<float>(2, i)));
   }
 }
 
@@ -174,13 +183,15 @@ void handle_images(const sensor_msgs::ImageConstPtr& left_msg,
   // If we don't have any keyframes, make this the first one
   if (!got_first_image) {
     got_first_image = true;
-    vector<cv::Point3f> features_3d(left_features_2d.size());
-    triangulate_stereo(features_3d, left_features_2d, left_ptr->image, right_ptr->image);
+    vector<cv::Point3f> features_3d;
+    vector<cv::Point2f> matched_features_2d;
+    triangulate_stereo(features_3d, matched_features_2d,
+                       left_features_2d, left_ptr->image, right_ptr->image);
 
     last_keyframe = make_shared<Keyframe>(Vector3f::Zero(),
                                           Quaternionf::Identity(),
                                           left_ptr->image,
-                                          left_features_2d,
+                                          matched_features_2d,
                                           features_3d);
 
     tvec = cv::Mat::zeros(3, 1, CV_32F);
@@ -223,16 +234,16 @@ void handle_images(const sensor_msgs::ImageConstPtr& left_msg,
   }
 
   // Allocate memory for new keyframe
-  num_features = left_features_2d.size();
   shared_ptr<Keyframe> new_keyframe  = make_shared<Keyframe>(Vector3f::Zero(),
                                                              Quaternionf::Identity(),
                                                              left_ptr->image,
-                                                             left_features_2d,
-                                                             vector<cv::Point3f>(num_features));
+                                                             vector<cv::Point2f>(),
+                                                             vector<cv::Point3f>());
     
   // Populate 3d features (used when processing next keyframe)
   triangulate_stereo(new_keyframe->features_3d,
                      new_keyframe->features_2d,
+                     left_features_2d,
                      new_keyframe->image,
                      right_ptr->image);
 
@@ -262,10 +273,8 @@ int main(int argc, char **argv) {
   ros::NodeHandle n("~");
 
   // KITTI topic
-  /*
   message_filters::Subscriber<sensor_msgs::Image> left_sub(n, "/leftImage", 3);
   message_filters::Subscriber<sensor_msgs::Image> right_sub(n, "/rightImage", 3);
-  */
 
   // d435i topic
   /*
@@ -280,8 +289,10 @@ int main(int argc, char **argv) {
   */
 
   // multisense topic
+  /*
   message_filters::Subscriber<sensor_msgs::Image> left_sub(n, "/multisense_sl/camera/left/image_raw", 3);
   message_filters::Subscriber<sensor_msgs::Image> right_sub(n, "/multisense_sl/camera/right/image_raw", 3);
+  */
 
   message_filters::Synchronizer<ApproxSyncPolicy> sync(ApproxSyncPolicy(10), left_sub, right_sub);
   sync.registerCallback(boost::bind(&handle_images, _1, _2));
