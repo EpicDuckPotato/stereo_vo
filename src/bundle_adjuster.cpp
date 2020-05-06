@@ -20,7 +20,7 @@ BundleAdjuster::BundleAdjuster(size_t _window_size, CameraInfo info) {
 }
 
 // Remove oldest pose variable from window
-void BundleAdjuster::removeOldestPose() {
+void BundleAdjuster::remove_oldest_pose() {
   shared_ptr<PoseVariable> oldest_pose = pose_window.front();
   for (pair<ceres::ResidualBlockId, size_t> observation : oldest_pose->observations) {
     problem->RemoveResidualBlock(observation.first);
@@ -84,11 +84,11 @@ void BundleAdjuster::add_keyframe(shared_ptr<Keyframe> keyframe) {
     features[feature_id].refcount++;
 
     pose_var->observations.push_back(make_pair(problem->AddResidualBlock(cost_func,
-                                                                        NULL /* squared loss */,
-                                                                        pose_var->position,
-                                                                        pose_var->orientation,
-                                                                        features[feature_id].position),
-                                                                        feature_id));
+                                                                         NULL /* squared loss */,
+                                                                         pose_var->position,
+                                                                         pose_var->orientation,
+                                                                         features[feature_id].position),
+                                                                         feature_id));
 
     problem->AddParameterBlock(pose_var->orientation, 4, &qparam);
   }
@@ -98,7 +98,7 @@ void BundleAdjuster::add_keyframe(shared_ptr<Keyframe> keyframe) {
 
   pose_window.push(pose_var);
   if (pose_window.size() > window_size) {
-    removeOldestPose();
+    remove_oldest_pose();
   }
 
   last_keyframe = keyframe;

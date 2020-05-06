@@ -9,6 +9,14 @@
 using namespace std;
 using namespace Eigen;
 
+/*
+ * Keyframe: stores the position and orientation of the world frame
+ * with respect to the camera frame for a keyframe, as well as the 
+ * keyframe's associated image, 2d features, 3d features (whose indices
+ * correspond with their 2d counterparts' in features_2d), and
+ * feature ids, which are used to identify features as they
+ * are tracked across multiple frames
+ */
 struct Keyframe {
   Vector3f position; 
   Quaternionf orientation; 
@@ -31,13 +39,13 @@ struct Keyframe {
            feature_ids(feature_ids) {}
 };
 
-// A variable representing a camera pose in the factor graph 
+// A variable representing a keyframe's camera pose in the factor graph 
 struct PoseVariable {
   double *position; 
   double *orientation; // Quaternion (wxyz), but we use local parameterization when optimizing
 
   // When we pop this from the window, we need to know which residual blocks to
-  // remove from the Ceres problem. We also need to know which features those
+  // remove from the Ceres problem. We also need to know which feature ids those
   // blocks correspond to, to decrement the refcount
   vector<pair<ceres::ResidualBlockId, size_t>> observations;
 
@@ -51,10 +59,11 @@ struct Feature {
   double *position; // 3d position in world frame
 
   // Every time this feature is observed in a keyframe, we increment the
-  // refcount. Every time a pose is popped from the bundle adjustment window,
-  // we decrement the refcount. In decrementing, if we find that the refcount
-  // becomes zero, we push this feature's index onto the empty_features stack,
-  // since this feature isn't being observed by any keyframes in the window.
+  // refcount. Every time a keyframe is popped from the bundle adjustment window,
+  // and this feature was observed at that keyframe, we decrement the refcount.
+  // In decrementing, if we find that the refcount becomes zero,
+  // we push this feature's index onto the avail_ids stack,
+  // since this feature isn't being observed by any keyframes in the window
   size_t refcount; 
 };
 
@@ -64,26 +73,49 @@ static const size_t max_features = 200;
 class BundleAdjuster
 {
   public:
+    /*
+     * BundleAdjuster: constructor
+     * ARGUMENTS
+     * info: camera intrinsics
+     * _window_size: number of keyframes to optimize in the sliding window
+     */
     BundleAdjuster(size_t _window_size, CameraInfo info);
 
+    /*
+     * get_last_keyframe: return a pointer to the last keyframe passed
+     * to this object with add_keyframe
+     * RETURN: a pointer to the last keyframe passed
+     * to this object with add_keyframe
+     */
     inline shared_ptr<Keyframe> get_last_keyframe() {
       return last_keyframe;
     }
 
     /*
-     * add_keyframe: assumes that the observations in keyframe->features_2d correspond to the
-     * same features as get_last_keyframe()->features_2d. If there are more observations in
-     * keyframe->features_2d than get_last_keyframe()->features_2d, these are added to the feature list,
-     * provided there's room. Any features that don't fit in the feature list are discarded.
+     * add_keyframe: adds a keyframe to the bundle adjustment window, and removes an old
+     * keyframe if there are too many. If there are more observations in
+     * keyframe->features_2d than get_last_keyframe()->features_2d, these are added to the feature list.
+     * Any features whose indices exceed max_features are discarded
      * After this function returns, calls to get_last_keyframe() will return a
      * pointer to this keyframe.
+     * ARGUMENTS
+     * keyframe: pointer to the keyframe to add
      */
     void add_keyframe(shared_ptr<Keyframe> keyframe);
 
+    /*
+     * bundle_adjust: performs optimization over all keyframes in the window and
+     * updates the position and orientation of the last keyframe. Any subsequent calls
+     * to get_last_keyframe will reflect the optimization
+     */
     void bundle_adjust();
   private:
-    void removeOldestPose();
+    /*
+     * remove_oldest_pose: removes the oldest pose from the bundle adjustment window
+     */
+    void remove_oldest_pose();
 
+    // list of all features that are observed by some keyframe in the window
     vector<Feature> features; 
 
     // available feature ids, i.e. indices of empty elements of the list

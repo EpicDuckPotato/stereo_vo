@@ -73,20 +73,43 @@ static const float baseline = 0.07;
 static const float parallax_thresh = 20;
 static const float min_feature_distance = 30;
 
-static cv::Mat camera_matrix;
+static cv::Mat camera_matrix; // 3x4 camera matrix
 
 static BundleAdjuster bundle_adjuster(5, {focal_length, cx, cy, 0, 0, 0, 0});
 
+// We use the previous transform (i.e. the previous solvePnP output) as the
+// initial guess for the next PnP solution
 static cv::Mat rvec;
 static cv::Mat tvec;
 
+/*
+ * right_projection_matrix: computes the projection matrix for the right
+ * camera in the stereo pair, given the left matrix
+ * ARGUMENTS
+ * right_pmat: populated with the right camera's projection matrix
+ * left_pmat: left camera's projection matrix
+ */
 void right_projection_matrix(cv::Mat &right_pmat, const cv::Mat &left_pmat) {
   right_pmat = left_pmat.clone();
   right_pmat.at<float>(0, 3) += focal_length*baseline;
 }
 
-// Computes the 3d positions of the features
-// REQUIRES: features_3d.size() == 0 && matched_features_2d.size() == 0
+/*
+ * triangulate_stereo: triangulates the 3d positions of 2d features
+ * ARGUMENTS
+ * features_3d: populated with the 3d positions of any features in
+ * left_features_2d that can be triangulated
+ * matched_features_2d: not all features will be present in both
+ * the left and right images, which is a condition necessary for
+ * triangulation. This vector is populated with all
+ * 2d feature positions that were able to take part in triangulation
+ * left_features_2d: 2d positions in left image to triangulate
+ * left: left image
+ * right: right image
+ * left_pmat: projection matrix for left camera in stereo pair
+ * REQUIRES: features_3d.size() == 0 && matched_features_2d.size() == 0
+ * ENSURES: features_3d.size() == matched_features_2d.size()
+ */
 void triangulate_stereo(vector<cv::Point3f>& features_3d,
                         vector<cv::Point2f>& matched_features_2d,
                         const vector<cv::Point2f>& left_features_2d,
@@ -97,38 +120,29 @@ void triangulate_stereo(vector<cv::Point3f>& features_3d,
   cv::Mat right_pmat;
   right_projection_matrix(right_pmat, left_pmat);
 
+  // Get disparity 
   cv::Mat disparity;
   cv::Ptr<cv::StereoBM> sbm = cv::StereoBM::create(16*3, 21);
   sbm->compute(left, right, disparity);
-
-  // Show disparity
-  /*
-  float minVal, maxVal;
-  cv::minMaxLoc(disparity, &minVal, &maxVal);
-  cv::Mat disp_u;
-  disparity.convertTo(disp_u, CV_8UC1, 255/(maxVal - minVal));
-  cv::imshow("disp", disp_u);
-  cv::waitKey(0);
-  */
-
   disparity.convertTo(disparity, CV_32F, 1.0/16);
 
   size_t num_features = left_features_2d.size();
 
+  // Determine which features have a valid disparity, and track
+  // them into the right image
   vector<cv::Point2f> right_features_2d;
   for (size_t i = 0; i < num_features; i++) {
     float disp = disparity.at<float>(left_features_2d[i].y,
                                      left_features_2d[i].x);
-    
     if (disp > 0) {
       matched_features_2d.push_back(left_features_2d[i]);
       right_features_2d.push_back(left_features_2d[i] + cv::Point2f(disp, 0));
     }
   }
 
+  // Triangulate 3d positions of features that could be tracked
   num_features = matched_features_2d.size();
   cv::Mat points_homogeneous = cv::Mat::zeros(4, num_features, CV_32F);
-
   if (num_features > 0) {
     cv::triangulatePoints(left_pmat, right_pmat, matched_features_2d,
                           right_features_2d, points_homogeneous);
@@ -142,17 +156,22 @@ void triangulate_stereo(vector<cv::Point3f>& features_3d,
   }
 }
 
-// As we get image pairs from ROS, we use them for processing only if features
-// from the last keyframe have sufficient parallax with this pair's left image.
-// If so, use previous keyframe's 3d feature positions to solve for current left
-// camera pose via PnP
+/*
+ * handle_images: As we get image pairs from ROS, we use them for processing only if features
+ * from the last keyframe have sufficient parallax with this pair's left image.
+ * If so, use previous keyframe's 3d feature positions to solve for current left
+ * camera pose via PnP
+ * ARGUMENTS
+ * left_msg: left image message
+ * right_msg: right image message
+ */
 void handle_images(const sensor_msgs::ImageConstPtr& left_msg,
                    const sensor_msgs::ImageConstPtr& right_msg) { 
   cv_bridge::CvImagePtr left_ptr = cv_bridge::toCvCopy(*left_msg, sensor_msgs::image_encodings::MONO8);
   cv_bridge::CvImagePtr right_ptr = cv_bridge::toCvCopy(*right_msg, sensor_msgs::image_encodings::MONO8);
 
   // Detect features in left image
-  vector<cv::KeyPoint> detected_keypoints;
+  //vector<cv::KeyPoint> detected_keypoints;
   vector<cv::Point2f> detected_features;
 
   // Images from r200 are especially noisy if you don't blur
@@ -218,7 +237,7 @@ void handle_images(const sensor_msgs::ImageConstPtr& left_msg,
   size_t num_features = tracked_features.size();
 
   // We might've lost some features. Therefore, create vectors of valid features for PnP. Also,
-  // if average parallax is less than threshold, don't use this frame as a keyframe
+  // check average parallax. If it's less than a threshold, don't use this frame as a keyframe
   vector<cv::Point2f> valid_tracked_features;
   vector<cv::Point3f> valid_features_3d;
   vector<size_t> valid_ids; 
@@ -243,7 +262,7 @@ void handle_images(const sensor_msgs::ImageConstPtr& left_msg,
     return;
   }
 
-  // Use PnP to get transform between last keyframe and this one
+  // Use PnP to get pose of world frame with respect to the current camera frame
   cv::Mat inlier_indices;
   solvePnPRansac(valid_features_3d,
                  valid_tracked_features,
@@ -261,7 +280,6 @@ void handle_images(const sensor_msgs::ImageConstPtr& left_msg,
   cv::cv2eigen(rmat, rmat_eigen);
   cv::cv2eigen(tvec, tvec_eigen);
 
-  // Get new keyframe's pose
   Quaternionf orientation(rmat_eigen);
 
   // Allocate memory for new keyframe
@@ -330,6 +348,8 @@ int main(int argc, char **argv) {
   ros::init(argc, argv, "vo_node");
   ros::NodeHandle n("~");
 
+  // Synchronize subscribers to left and right images
+
   // KITTI topic
   message_filters::Subscriber<sensor_msgs::Image> left_sub(n, "/leftImage", 10);
   message_filters::Subscriber<sensor_msgs::Image> right_sub(n, "/rightImage", 10);
@@ -352,14 +372,15 @@ int main(int argc, char **argv) {
   message_filters::Subscriber<sensor_msgs::Image> right_sub(n, "/multisense_sl/camera/right/image_raw", 3);
   */
 
+  message_filters::Synchronizer<ApproxSyncPolicy> sync(ApproxSyncPolicy(10), left_sub, right_sub);
+  sync.registerCallback(boost::bind(&handle_images, _1, _2));
+
+  // Populate camera matrix with intrinsics
   camera_matrix = cv::Mat::eye(3, 4, CV_32F);
   camera_matrix.at<float>(0, 0) = focal_length;
   camera_matrix.at<float>(0, 2) = cx;
   camera_matrix.at<float>(1, 1) = focal_length;
   camera_matrix.at<float>(1, 2) = cy;
-
-  message_filters::Synchronizer<ApproxSyncPolicy> sync(ApproxSyncPolicy(10), left_sub, right_sub);
-  sync.registerCallback(boost::bind(&handle_images, _1, _2));
 
   tf2_ros::TransformBroadcaster br;
 
@@ -375,6 +396,7 @@ int main(int argc, char **argv) {
       Quaternionf orientation = keyframe->orientation.conjugate();
       Vector3f position = orientation*(-keyframe->position);
 
+      // Publish camera position to tf
       geometry_msgs::TransformStamped pose;
       pose.transform.rotation.w = orientation.w();
       pose.transform.rotation.x = orientation.x();
@@ -391,6 +413,7 @@ int main(int argc, char **argv) {
 
       br.sendTransform(pose);
 
+      // Publish path
       geometry_msgs::PoseStamped gpose;
       gpose.pose.orientation.w = orientation.w();
       gpose.pose.orientation.x = orientation.x();
@@ -408,7 +431,7 @@ int main(int argc, char **argv) {
       path.header.stamp = gpose.header.stamp;
       path_pub.publish(path);
 
-      // For displaying features in rviz
+      // Display features in rviz
       /*
       visualization_msgs::Marker marker;
       marker.header.stamp = pose.header.stamp;

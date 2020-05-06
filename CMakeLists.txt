@@ -146,6 +146,9 @@ add_library(bundle_adjustment OBJECT
 add_executable(vo_node src/vo_node.cpp $<TARGET_OBJECTS:bundle_adjustment>)
 target_link_libraries(vo_node ${catkin_LIBRARIES} ${CERES_LIBRARIES})
 
+add_executable(kitti_node src/kitti_node.cpp)
+target_link_libraries(kitti_node ${catkin_LIBRARIES})
+
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
 ## target back to the shorter version for ease of user use
