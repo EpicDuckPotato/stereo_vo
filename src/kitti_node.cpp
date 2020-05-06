@@ -36,7 +36,7 @@ int main(int argc, char** argv) {
   nav_msgs::Path path;
   path.header.frame_id = "world";
 
-  ros::Rate r(30);
+  ros::Rate r(11);
   for (size_t i = 0;
        gt >> R(0, 0) >> R(0, 1) >> R(0, 2) >> t(0) >> 
              R(1, 0) >> R(1, 1) >> R(1, 2) >> t(1) >> 
