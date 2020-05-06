@@ -112,6 +112,10 @@ void BundleAdjuster::bundle_adjust() {
   last_keyframe->position(0) = pose_var->position[0];
   last_keyframe->position(1) = pose_var->position[1];
   last_keyframe->position(2) = pose_var->position[2];
+  last_keyframe->orientation.w() = pose_var->orientation[0];
+  last_keyframe->orientation.x() = pose_var->orientation[1];
+  last_keyframe->orientation.y() = pose_var->orientation[2];
+  last_keyframe->orientation.z() = pose_var->orientation[3];
   
   size_t visible_features = last_keyframe->feature_ids.size();
   for (size_t i = 0; i < visible_features; i++) {
