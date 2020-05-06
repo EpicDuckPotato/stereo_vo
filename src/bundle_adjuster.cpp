@@ -13,13 +13,17 @@ BundleAdjuster::BundleAdjuster(size_t _window_size, CameraInfo info) {
   options.minimizer_progress_to_stdout = false;
 
   camera_info = info;
+
+  ceres::Problem::Options problem_options;
+  problem_options.enable_fast_removal = true;
+  problem = make_unique<ceres::Problem>(problem_options);
 }
 
 // Remove oldest pose variable from window
 void BundleAdjuster::removeOldestPose() {
   shared_ptr<PoseVariable> oldest_pose = pose_window.front();
   for (pair<ceres::ResidualBlockId, size_t> observation : oldest_pose->observations) {
-    problem.RemoveResidualBlock(observation.first);
+    problem->RemoveResidualBlock(observation.first);
     features[observation.second].refcount--;
     
     // Determine whether this feature was observed at any pose in the window. If not,
@@ -43,13 +47,10 @@ void BundleAdjuster::add_keyframe(shared_ptr<Keyframe> keyframe) {
   pose_var->position[1] = keyframe->position(1);
   pose_var->position[2] = keyframe->position(2);
 
-  // TODO: Ceres can use eigen somehow, see link above. Also, look up
-  // ceres LocalParameterization to figure out how to use error state
-  float angle = keyframe->orientation.angle();
-  Vector3f axis = keyframe->orientation.axis();
-  pose_var->orientation[0] = angle*axis(0);
-  pose_var->orientation[1] = angle*axis(1);
-  pose_var->orientation[2] = angle*axis(2);
+  pose_var->orientation[0] = keyframe->orientation.w();
+  pose_var->orientation[1] = keyframe->orientation.x();
+  pose_var->orientation[2] = keyframe->orientation.y();
+  pose_var->orientation[2] = keyframe->orientation.z();
 
   for (size_t i = 0; i < num_features && i < max_features; i++) {
     // Add a residual block for the keyframe's observation of this feature
@@ -82,12 +83,14 @@ void BundleAdjuster::add_keyframe(shared_ptr<Keyframe> keyframe) {
     }
     features[feature_id].refcount++;
 
-    pose_var->observations.push_back(make_pair(problem.AddResidualBlock(cost_func,
+    pose_var->observations.push_back(make_pair(problem->AddResidualBlock(cost_func,
                                                                         NULL /* squared loss */,
                                                                         pose_var->position,
                                                                         pose_var->orientation,
                                                                         features[feature_id].position),
                                                                         feature_id));
+
+    problem->AddParameterBlock(pose_var->orientation, 4, &qparam);
   }
 
   keyframe->features_2d.resize(keyframe->feature_ids.size());
@@ -103,7 +106,7 @@ void BundleAdjuster::add_keyframe(shared_ptr<Keyframe> keyframe) {
 
 void BundleAdjuster::bundle_adjust() { 
   ceres::Solver::Summary summary;
-  ceres::Solve(options, &problem, &summary);
+  ceres::Solve(options, problem.get(), &summary);
 
   shared_ptr<PoseVariable> pose_var = pose_window.back();
   last_keyframe->position(0) = pose_var->position[0];

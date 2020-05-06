@@ -4,20 +4,21 @@
 #include <cstdlib>
 #include <stack>
 #include "camera_info.hpp"
+#include "ceres/local_parameterization.h"
 
 using namespace std;
 using namespace Eigen;
 
 struct Keyframe {
   Vector3f position; 
-  AngleAxisf orientation; 
+  Quaternionf orientation; 
   cv::Mat image; 
   vector<cv::Point2f> features_2d; 
   vector<cv::Point3f> features_3d;
   vector<size_t> feature_ids;
 
   Keyframe(Vector3f position, 
-           AngleAxisf orientation,
+           Quaternionf orientation,
            cv::Mat image,
            vector<cv::Point2f> features_2d,
            vector<cv::Point3f> features_3d,
@@ -33,7 +34,7 @@ struct Keyframe {
 // A variable representing a camera pose in the factor graph 
 struct PoseVariable {
   double *position; 
-  double *orientation; // rotation vector
+  double *orientation; // Quaternion (wxyz), but we use local parameterization when optimizing
 
   // When we pop this from the window, we need to know which residual blocks to
   // remove from the Ceres problem. We also need to know which features those
@@ -42,7 +43,7 @@ struct PoseVariable {
 
   PoseVariable() {
     position = new double[3];
-    orientation = new double[3];
+    orientation = new double[4];
   }
 };
 
@@ -93,8 +94,9 @@ class BundleAdjuster
 
     shared_ptr<Keyframe> last_keyframe;
 
-    ceres::Problem problem;
+    unique_ptr<ceres::Problem> problem;
     ceres::Solver::Options options;
+    ceres::QuaternionParameterization qparam;
 
     CameraInfo camera_info;
 };

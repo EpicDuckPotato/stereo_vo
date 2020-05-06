@@ -192,7 +192,7 @@ void handle_images(const sensor_msgs::ImageConstPtr& left_msg,
                        camera_matrix);
 
     shared_ptr<Keyframe> new_keyframe = make_shared<Keyframe>(Vector3f::Zero(),
-                                                              AngleAxisf::Identity(),
+                                                              Quaternionf::Identity(),
                                                               left_ptr->image,
                                                               matched_features_2d,
                                                               features_3d,
@@ -262,11 +262,10 @@ void handle_images(const sensor_msgs::ImageConstPtr& left_msg,
   cv::cv2eigen(tvec, tvec_eigen);
 
   // Get new keyframe's pose
-  AngleAxisf orientation(rmat_eigen.transpose());
-  Vector3f position = -rmat_eigen.transpose()*tvec_eigen;
+  Quaternionf orientation(rmat_eigen);
 
   // Allocate memory for new keyframe
-  shared_ptr<Keyframe> new_keyframe = make_shared<Keyframe>(position,
+  shared_ptr<Keyframe> new_keyframe = make_shared<Keyframe>(tvec_eigen,
                                                             orientation,
                                                             left_ptr->image,
                                                             vector<cv::Point2f>(num_inliers),
@@ -332,8 +331,8 @@ int main(int argc, char **argv) {
   ros::NodeHandle n("~");
 
   // KITTI topic
-  message_filters::Subscriber<sensor_msgs::Image> left_sub(n, "/leftImage", 3);
-  message_filters::Subscriber<sensor_msgs::Image> right_sub(n, "/rightImage", 3);
+  message_filters::Subscriber<sensor_msgs::Image> left_sub(n, "/leftImage", 10);
+  message_filters::Subscriber<sensor_msgs::Image> right_sub(n, "/rightImage", 10);
 
   // d435i topic
   /*
@@ -364,7 +363,7 @@ int main(int argc, char **argv) {
 
   tf2_ros::TransformBroadcaster br;
 
-  ros::Publisher marker_pub = n.advertise<visualization_msgs::Marker>("features", 1);
+  //ros::Publisher marker_pub = n.advertise<visualization_msgs::Marker>("features", 1);
   ros::Publisher path_pub = n.advertise<nav_msgs::Path>("/vo/path", 1);
   nav_msgs::Path path;
   path.header.frame_id = "world";
@@ -373,7 +372,8 @@ int main(int argc, char **argv) {
   while (ros::ok()) {
     if (bundle_adjuster.get_last_keyframe() != nullptr) {
       shared_ptr<Keyframe> keyframe = bundle_adjuster.get_last_keyframe();
-      Quaternionf orientation(keyframe->orientation);
+      Quaternionf orientation = keyframe->orientation.conjugate();
+      Vector3f position = orientation*(-keyframe->position);
 
       geometry_msgs::TransformStamped pose;
       pose.transform.rotation.w = orientation.w();
@@ -381,9 +381,9 @@ int main(int argc, char **argv) {
       pose.transform.rotation.y = orientation.y();
       pose.transform.rotation.z = orientation.z();
 
-      pose.transform.translation.x = keyframe->position(0);
-      pose.transform.translation.y = keyframe->position(1);
-      pose.transform.translation.z = keyframe->position(2);
+      pose.transform.translation.x = position(0);
+      pose.transform.translation.y = position(1);
+      pose.transform.translation.z = position(2);
 
       pose.header.stamp = ros::Time::now();
       pose.header.frame_id = "world";
@@ -397,9 +397,9 @@ int main(int argc, char **argv) {
       gpose.pose.orientation.y = orientation.y();
       gpose.pose.orientation.z = orientation.z();
 
-      gpose.pose.position.x = keyframe->position(0);
-      gpose.pose.position.y = keyframe->position(1);
-      gpose.pose.position.z = keyframe->position(2);
+      gpose.pose.position.x = position(0);
+      gpose.pose.position.y = position(1);
+      gpose.pose.position.z = position(2);
 
       gpose.header.stamp = pose.header.stamp;
       gpose.header.frame_id = "vo_pose";
@@ -409,6 +409,7 @@ int main(int argc, char **argv) {
       path_pub.publish(path);
 
       // For displaying features in rviz
+      /*
       visualization_msgs::Marker marker;
       marker.header.stamp = pose.header.stamp;
       marker.header.frame_id = "world";
@@ -438,6 +439,9 @@ int main(int argc, char **argv) {
       }
  
       marker_pub.publish(marker);
+      */
+
+      bundle_adjuster.bundle_adjust();
     }
 
     r.sleep();

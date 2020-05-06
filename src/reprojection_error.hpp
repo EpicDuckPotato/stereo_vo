@@ -12,7 +12,7 @@ struct ReprojectionError {
                   const T* const point,
                   T* residuals) const {
     T p[3];
-    ceres::AngleAxisRotatePoint(orientation, point, p);
+    ceres::QuaternionRotatePoint(orientation, point, p);
 
     p[0] += position[3];
     p[1] += position[4];
@@ -42,12 +42,12 @@ struct ReprojectionError {
     return true;
   }
 
-   // Factory to hide the construction of the CostFunction object from
-   // the client code.
-   static ceres::CostFunction* Create(double observed_x, double observed_y, CameraInfo info) {
-     return (new ceres::AutoDiffCostFunction<ReprojectionError, 2, 3, 3, 3>(
-                 new ReprojectionError(observed_x, observed_y, info)));
-   }
+  // Factory to hide the construction of the CostFunction object from
+  // the client code.
+  static ceres::CostFunction* Create(double observed_x, double observed_y, CameraInfo info) {
+    return (new ceres::AutoDiffCostFunction<ReprojectionError, 2, 3, 4, 3>(
+                new ReprojectionError(observed_x, observed_y, info)));
+  }
 
   double observed_x;
   double observed_y;
