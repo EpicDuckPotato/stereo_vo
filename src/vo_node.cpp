@@ -171,7 +171,6 @@ void handle_images(const sensor_msgs::ImageConstPtr& left_msg,
   cv_bridge::CvImagePtr right_ptr = cv_bridge::toCvCopy(*right_msg, sensor_msgs::image_encodings::MONO8);
 
   // Detect features in left image
-  //vector<cv::KeyPoint> detected_keypoints;
   vector<cv::Point2f> detected_features;
 
   // Images from r200 are especially noisy if you don't blur
@@ -181,6 +180,7 @@ void handle_images(const sensor_msgs::ImageConstPtr& left_msg,
   */
 
   /*
+  vector<cv::KeyPoint> detected_keypoints;
   cv::FAST(left_ptr->image, detected_keypoints, 40); // better for KITTI
   //cv::FAST(left_ptr->image, detected_keypoints, 10); // better for d435i in snake bags
 
@@ -384,10 +384,11 @@ int main(int argc, char **argv) {
 
   tf2_ros::TransformBroadcaster br;
 
-  //ros::Publisher marker_pub = n.advertise<visualization_msgs::Marker>("features", 1);
   ros::Publisher path_pub = n.advertise<nav_msgs::Path>("/vo/path", 1);
   nav_msgs::Path path;
   path.header.frame_id = "world";
+
+  ros::Publisher marker_pub = n.advertise<visualization_msgs::Marker>("features", 1);
 
   ros::Rate r(20);
   while (ros::ok()) {
@@ -434,7 +435,6 @@ int main(int argc, char **argv) {
       // Display features in rviz
       /*
       visualization_msgs::Marker marker;
-      marker.header.stamp = pose.header.stamp;
       marker.header.frame_id = "world";
       marker.ns = "vo_node";
       marker.action = visualization_msgs::Marker::ADD;
@@ -450,6 +450,7 @@ int main(int argc, char **argv) {
       marker.scale.y = 0.2;
       marker.color.g = 1.0f;
       marker.color.a = 1.0;
+      marker.header.stamp = pose.header.stamp;
 
       size_t num_features = keyframe->features_3d.size();
       for (size_t i = 0; i < num_features; ++i) {

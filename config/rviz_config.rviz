@@ -6,10 +6,10 @@ Panels:
       Expanded:
         - /Global Options1
         - /Axes1
-        - /Axes2/Status1
         - /Axes3
         - /Path1
         - /Path2
+        - /Marker1
       Splitter Ratio: 0.4651159942150116
     Tree Height: 804
   - Class: rviz/Selection
@@ -129,6 +129,14 @@ Visualization Manager:
       Shaft Length: 0.10000000149011612
       Topic: /vo/path
       Unreliable: false
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /vo_node/features
+      Name: Marker
+      Namespaces:
+        vo_node: true
+      Queue Size: 100
       Value: true
   Enabled: true
   Global Options:
