@@ -14,9 +14,9 @@ struct ReprojectionError {
     T p[3];
     ceres::QuaternionRotatePoint(orientation, point, p);
 
-    p[0] += position[3];
-    p[1] += position[4];
-    p[2] += position[5];
+    p[0] += position[0];
+    p[1] += position[1];
+    p[2] += position[2];
 
     T xp = p[0] / p[2];
     T yp = p[1] / p[2];

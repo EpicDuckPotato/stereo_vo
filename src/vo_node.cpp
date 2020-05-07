@@ -91,7 +91,7 @@ static cv::Mat tvec;
  */
 void right_projection_matrix(cv::Mat &right_pmat, const cv::Mat &left_pmat) {
   right_pmat = left_pmat.clone();
-  right_pmat.at<float>(0, 3) += focal_length*baseline;
+  right_pmat.at<float>(0, 3) -= focal_length*baseline;
 }
 
 /*
@@ -136,7 +136,7 @@ void triangulate_stereo(vector<cv::Point3f>& features_3d,
                                      left_features_2d[i].x);
     if (disp > 0) {
       matched_features_2d.push_back(left_features_2d[i]);
-      right_features_2d.push_back(left_features_2d[i] + cv::Point2f(disp, 0));
+      right_features_2d.push_back(left_features_2d[i] - cv::Point2f(disp, 0));
     }
   }
 

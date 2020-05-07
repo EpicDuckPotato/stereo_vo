@@ -1,9 +1,6 @@
 #include "bundle_adjuster.hpp"
 #include "reprojection_error.hpp"
-
-// TODO: check out Ceres rotation.h for other rotation parameterizations and autodifferentiable
-// functions. Also check out https://ceres-solver.googlesource.com/ceres-solver/+/master/examples/slam/pose_graph_3d/pose_graph_3d.cc
-// to see how Ceres meshes with Eigen
+#include "ceres/loss_function.h"
 
 BundleAdjuster::BundleAdjuster(size_t _window_size, CameraInfo info) {
   window_size = _window_size;
@@ -11,6 +8,7 @@ BundleAdjuster::BundleAdjuster(size_t _window_size, CameraInfo info) {
   // Set solver options
   options.linear_solver_type = ceres::DENSE_SCHUR;
   options.minimizer_progress_to_stdout = false;
+  options.max_solver_time_in_seconds = 0.1;
 
   camera_info = info;
 
@@ -50,7 +48,7 @@ void BundleAdjuster::add_keyframe(shared_ptr<Keyframe> keyframe) {
   pose_var->orientation[0] = keyframe->orientation.w();
   pose_var->orientation[1] = keyframe->orientation.x();
   pose_var->orientation[2] = keyframe->orientation.y();
-  pose_var->orientation[2] = keyframe->orientation.z();
+  pose_var->orientation[3] = keyframe->orientation.z();
 
   for (size_t i = 0; i < num_features && i < max_features; i++) {
     // Add a residual block for the keyframe's observation of this feature
@@ -89,9 +87,9 @@ void BundleAdjuster::add_keyframe(shared_ptr<Keyframe> keyframe) {
                                                                          pose_var->orientation,
                                                                          features[feature_id].position),
                                                                          feature_id));
-
-    problem->AddParameterBlock(pose_var->orientation, 4, &qparam);
   }
+  // Use local parameterization for quaternion
+  problem->SetParameterization(pose_var->orientation, &qparam);
 
   keyframe->features_2d.resize(keyframe->feature_ids.size());
   keyframe->features_3d.resize(keyframe->feature_ids.size());
