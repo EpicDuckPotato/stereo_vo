@@ -15,6 +15,8 @@ BundleAdjuster::BundleAdjuster(size_t _window_size, CameraInfo info) {
   ceres::Problem::Options problem_options;
   problem_options.enable_fast_removal = true;
   problem = make_unique<ceres::Problem>(problem_options);
+  se3param = make_unique<ceres::ProductParameterization>(new ceres::QuaternionParameterization(),
+                                                         new ceres::IdentityParameterization(3));
 }
 
 // Remove oldest pose variable from window
@@ -41,14 +43,15 @@ void BundleAdjuster::add_keyframe(shared_ptr<Keyframe> keyframe) {
   size_t num_features = keyframe->features_2d.size();
 
   shared_ptr<PoseVariable> pose_var = make_shared<PoseVariable>(); 
-  pose_var->position[0] = keyframe->position(0);
-  pose_var->position[1] = keyframe->position(1);
-  pose_var->position[2] = keyframe->position(2);
 
-  pose_var->orientation[0] = keyframe->orientation.w();
-  pose_var->orientation[1] = keyframe->orientation.x();
-  pose_var->orientation[2] = keyframe->orientation.y();
-  pose_var->orientation[3] = keyframe->orientation.z();
+  pose_var->pose[0] = keyframe->orientation.w();
+  pose_var->pose[1] = keyframe->orientation.x();
+  pose_var->pose[2] = keyframe->orientation.y();
+  pose_var->pose[3] = keyframe->orientation.z();
+
+  pose_var->pose[4] = keyframe->position(0);
+  pose_var->pose[5] = keyframe->position(1);
+  pose_var->pose[6] = keyframe->position(2);
 
   for (size_t i = 0; i < num_features && i < max_features; i++) {
     // Add a residual block for the keyframe's observation of this feature
@@ -83,13 +86,11 @@ void BundleAdjuster::add_keyframe(shared_ptr<Keyframe> keyframe) {
 
     pose_var->observations.push_back(make_pair(problem->AddResidualBlock(cost_func,
                                                                          NULL /* squared loss */,
-                                                                         pose_var->position,
-                                                                         pose_var->orientation,
+                                                                         pose_var->pose,
                                                                          features[feature_id].position),
                                                                          feature_id));
   }
-  // Use local parameterization for quaternion
-  problem->SetParameterization(pose_var->orientation, &qparam);
+  problem->SetParameterization(pose_var->pose, se3param.get());
 
   keyframe->features_2d.resize(keyframe->feature_ids.size());
   keyframe->features_3d.resize(keyframe->feature_ids.size());
@@ -107,13 +108,13 @@ void BundleAdjuster::bundle_adjust() {
   ceres::Solve(options, problem.get(), &summary);
 
   shared_ptr<PoseVariable> pose_var = pose_window.back();
-  last_keyframe->position(0) = pose_var->position[0];
-  last_keyframe->position(1) = pose_var->position[1];
-  last_keyframe->position(2) = pose_var->position[2];
-  last_keyframe->orientation.w() = pose_var->orientation[0];
-  last_keyframe->orientation.x() = pose_var->orientation[1];
-  last_keyframe->orientation.y() = pose_var->orientation[2];
-  last_keyframe->orientation.z() = pose_var->orientation[3];
+  last_keyframe->orientation.w() = pose_var->pose[0];
+  last_keyframe->orientation.x() = pose_var->pose[1];
+  last_keyframe->orientation.y() = pose_var->pose[2];
+  last_keyframe->orientation.z() = pose_var->pose[3];
+  last_keyframe->position(0) = pose_var->pose[4];
+  last_keyframe->position(1) = pose_var->pose[5];
+  last_keyframe->position(2) = pose_var->pose[6];
   
   size_t visible_features = last_keyframe->feature_ids.size();
   for (size_t i = 0; i < visible_features; i++) {

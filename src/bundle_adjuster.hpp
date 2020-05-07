@@ -41,8 +41,7 @@ struct Keyframe {
 
 // A variable representing a keyframe's camera pose in the factor graph 
 struct PoseVariable {
-  double *position; 
-  double *orientation; // Quaternion (wxyz), but we use local parameterization when optimizing
+  double *pose; // wxyz (orientation), xyz (position)
 
   // When we pop this from the window, we need to know which residual blocks to
   // remove from the Ceres problem. We also need to know which feature ids those
@@ -50,8 +49,7 @@ struct PoseVariable {
   vector<pair<ceres::ResidualBlockId, size_t>> observations;
 
   PoseVariable() {
-    position = new double[3];
-    orientation = new double[4];
+    pose = new double[7];
   }
 };
 
@@ -128,7 +126,7 @@ class BundleAdjuster
 
     unique_ptr<ceres::Problem> problem;
     ceres::Solver::Options options;
-    ceres::QuaternionParameterization qparam;
+    unique_ptr<ceres::ProductParameterization> se3param;
 
     CameraInfo camera_info;
 };
