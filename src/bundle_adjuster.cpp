@@ -1,5 +1,6 @@
 #include "bundle_adjuster.hpp"
 #include "reprojection_error.hpp"
+#include "reprojection_factor.hpp"
 #include "ceres/loss_function.h"
 
 BundleAdjuster::BundleAdjuster(size_t _window_size, CameraInfo info) {
@@ -9,6 +10,7 @@ BundleAdjuster::BundleAdjuster(size_t _window_size, CameraInfo info) {
   options.linear_solver_type = ceres::DENSE_SCHUR;
   options.minimizer_progress_to_stdout = false;
   options.max_solver_time_in_seconds = 0.1;
+  options.num_threads = 4;
 
   camera_info = info;
 
@@ -56,7 +58,7 @@ void BundleAdjuster::add_keyframe(shared_ptr<Keyframe> keyframe) {
   for (size_t i = 0; i < num_features && i < max_features; i++) {
     // Add a residual block for the keyframe's observation of this feature
     cv::Point2f feature = keyframe->features_2d[i];
-    ceres::CostFunction *cost_func = ReprojectionError::Create(feature.x, feature.y, camera_info);
+    ReprojectionFactor *cost_func = new ReprojectionFactor(feature.x, feature.y, camera_info);
 
     size_t feature_id;
     if (i < num_tracked) {

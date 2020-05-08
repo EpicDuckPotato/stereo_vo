@@ -66,7 +66,7 @@ struct Feature {
 };
 
 // Limit to number of features in a keyframe
-static const size_t max_features = 200;
+static const size_t max_features = 400;
 
 class BundleAdjuster
 {
