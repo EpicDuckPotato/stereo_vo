@@ -36,8 +36,8 @@ struct ReprojectionError {
                                             T(camera_info.p1) * (r2 + 2.0*y2) +
                                             cross) + camera_info.cy;
     */
-    T predicted_x = T(camera_info.focal) * xp + camera_info.cx;
-    T predicted_y = T(camera_info.focal) * yp + camera_info.cy;
+    T predicted_x = T(camera_info.focal) * xp + T(camera_info.cx);
+    T predicted_y = T(camera_info.focal) * yp + T(camera_info.cy);
 
     // The error is the difference between the predicted and observed position.
     residuals[0] = predicted_x - T(observed_x);
