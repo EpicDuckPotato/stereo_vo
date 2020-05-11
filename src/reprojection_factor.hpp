@@ -15,4 +15,5 @@ class ReprojectionFactor : public ceres::SizedCostFunction<2, 7, 3> {
   private:
     Matrix<double, 2, 3> K; // camera matrix
     Vector2d obs; // observation, homogeneous coordinates
+    CameraInfo camera_info;
 };

@@ -4,6 +4,7 @@ ReprojectionFactor::ReprojectionFactor(double ox, double oy, CameraInfo info) {
   obs = Vector2d(ox, oy);
   K << info.focal, 0         , info.cx,
        0         , info.focal, info.cy;
+  camera_info = info;
 }
 
 bool ReprojectionFactor::Evaluate(double const* const* parameters,
@@ -31,52 +32,55 @@ bool ReprojectionFactor::Evaluate(double const* const* parameters,
 
   Vector3d gamma = LR*p + t;
 
-  double psi = 1/(2*((q(1)*q(3) - q(0)*q(2))*p(0) + (q(2)*q(3) + q(0)*q(1))*p(1)) +
-                  (q(0)*q(0) + q(3)*q(3) - q(1)*q(1) - q(2)*q(2))*p(2) + t(2));
-  double npsi2 = -psi*psi;
+  double psi = 1/gamma(2);
 
   // Calculate residual
   resid = K*psi*gamma - obs;
 
-  // Compute jacobians
+  double q1 = parameters[0][0];
+  double q2 = parameters[0][1];
+  double q3 = parameters[0][2];
+  double q4 = parameters[0][3];
+  double t1 = parameters[0][4];
+  double t2 = parameters[0][5];
+  double t3 = parameters[0][6];
+  double p1 = parameters[1][0];
+  double p2 = parameters[1][1];
+  double p3 = parameters[1][2];
+
+  // Residual expressions from MATLAB symbolic computation. Didn't seem necessary to use them
+  /*
+  resid[0] = camera_info.cx-obs(0)+(camera_info.focal*(t1+q1*(p1*q1-p2*q4+p3*q3)+q3*(-p1*q3+p2*q2+p3*q1)+q2*(p1*q2+p2*q3+p3*q4)-q4*(p2*q1+p1*q4-p3*q2)))/(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4));
+  resid[1] = camera_info.cy-obs(1)+(camera_info.focal*(t2+q1*(p2*q1+p1*q4-p3*q2)-q2*(-p1*q3+p2*q2+p3*q1)+q3*(p1*q2+p2*q3+p3*q4)+q4*(p1*q1-p2*q4+p3*q3)))/(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4));
+  */
+
+  // Compute jacobians (from MATLAB symbolic differentiation)
   if (jacobians) {
-    // Jacobian wrt pose
     if (jacobians[0]) {
-      // Orientation
-      Map<Matrix<double, 2, 4, RowMajor>> dr_dq(jacobians[0]);
+      Map<Matrix<double, 2, 7, RowMajor>> dr_dpose(jacobians[0]);
+      dr_dpose.setZero();
 
-      Matrix<double, 3, 4> dgamma_dq;
-      dgamma_dq.block<3, 1>(0, 0) = 2*(q.tail<3>().cross(p) + q(0)*p);
+      jacobians[0][0] = (camera_info.focal*(p1*q1*2.0-p2*q4*2.0+p3*q3*2.0))/(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4))-camera_info.focal*(p1*q3*-2.0+p2*q2*2.0+p3*q1*2.0)*(t1+q1*(p1*q1-p2*q4+p3*q3)+q3*(-p1*q3+p2*q2+p3*q1)+q2*(p1*q2+p2*q3+p3*q4)-q4*(p2*q1+p1*q4-p3*q2))*1.0/pow(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4),2.0);
+      jacobians[0][1] = (camera_info.focal*(p1*q2*2.0+p2*q3*2.0+p3*q4*2.0))/(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4))-camera_info.focal*(p2*q1*2.0+p1*q4*2.0-p3*q2*2.0)*(t1+q1*(p1*q1-p2*q4+p3*q3)+q3*(-p1*q3+p2*q2+p3*q1)+q2*(p1*q2+p2*q3+p3*q4)-q4*(p2*q1+p1*q4-p3*q2))*1.0/pow(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4),2.0);
+      jacobians[0][2] = (camera_info.focal*(p1*q3*-2.0+p2*q2*2.0+p3*q1*2.0))/(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4))+camera_info.focal*(p1*q1*2.0-p2*q4*2.0+p3*q3*2.0)*(t1+q1*(p1*q1-p2*q4+p3*q3)+q3*(-p1*q3+p2*q2+p3*q1)+q2*(p1*q2+p2*q3+p3*q4)-q4*(p2*q1+p1*q4-p3*q2))*1.0/pow(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4),2.0);
+      jacobians[0][3] = -(camera_info.focal*(p2*q1*2.0+p1*q4*2.0-p3*q2*2.0))/(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4))-camera_info.focal*(p1*q2*2.0+p2*q3*2.0+p3*q4*2.0)*(t1+q1*(p1*q1-p2*q4+p3*q3)+q3*(-p1*q3+p2*q2+p3*q1)+q2*(p1*q2+p2*q3+p3*q4)-q4*(p2*q1+p1*q4-p3*q2))*1.0/pow(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4),2.0);
+      jacobians[0][7] = (camera_info.focal*(p2*q1*2.0+p1*q4*2.0-p3*q2*2.0))/(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4))-camera_info.focal*(p1*q3*-2.0+p2*q2*2.0+p3*q1*2.0)*(t2+q1*(p2*q1+p1*q4-p3*q2)-q2*(-p1*q3+p2*q2+p3*q1)+q3*(p1*q2+p2*q3+p3*q4)+q4*(p1*q1-p2*q4+p3*q3))*1.0/pow(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4),2.0);
+      jacobians[0][8] = -(camera_info.focal*(p1*q3*-2.0+p2*q2*2.0+p3*q1*2.0))/(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4))-camera_info.focal*(p2*q1*2.0+p1*q4*2.0-p3*q2*2.0)*(t2+q1*(p2*q1+p1*q4-p3*q2)-q2*(-p1*q3+p2*q2+p3*q1)+q3*(p1*q2+p2*q3+p3*q4)+q4*(p1*q1-p2*q4+p3*q3))*1.0/pow(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4),2.0);
+      jacobians[0][9] = (camera_info.focal*(p1*q2*2.0+p2*q3*2.0+p3*q4*2.0))/(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4))+camera_info.focal*(p1*q1*2.0-p2*q4*2.0+p3*q3*2.0)*(t2+q1*(p2*q1+p1*q4-p3*q2)-q2*(-p1*q3+p2*q2+p3*q1)+q3*(p1*q2+p2*q3+p3*q4)+q4*(p1*q1-p2*q4+p3*q3))*1.0/pow(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4),2.0);
+      jacobians[0][10] = (camera_info.focal*(p1*q1*2.0-p2*q4*2.0+p3*q3*2.0))/(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4))-camera_info.focal*(p1*q2*2.0+p2*q3*2.0+p3*q4*2.0)*(t2+q1*(p2*q1+p1*q4-p3*q2)-q2*(-p1*q3+p2*q2+p3*q1)+q3*(p1*q2+p2*q3+p3*q4)+q4*(p1*q1-p2*q4+p3*q3))*1.0/pow(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4),2.0);
 
-      double qtp = 2*q.tail<3>().dot(p);
-
-      dgamma_dq(0, 1) = qtp;
-      dgamma_dq(1, 1) = 2*(q(2)*p(0) - q(1)*p(1) - q(0)*p(2));
-      dgamma_dq(2, 1) = 2*(q(3)*p(0) - q(1)*p(1) + q(0)*p(1));
-
-      dgamma_dq(0, 2) = 2*(-q(2)*p(0) + q(2)*p(1) + q(0)*p(2));
-      dgamma_dq(1, 2) = qtp;
-      dgamma_dq(2, 2) = 2*(q(3)*p(1) - q(2)*p(2) - q(0)*p(0));
-
-      dgamma_dq(0, 3) = 2*(-q(3)*p(0) + q(1)*p(2) - q(0)*p(1));
-      dgamma_dq(1, 3) = 2*(-q(3)*p(1) + q(2)*p(2) + q(0)*p(0));
-      dgamma_dq(2, 3) = qtp;
-
-      dr_dq = K*(psi*dgamma_dq + npsi2*gamma*RowVector4d(2*(q(0)*p(2) - q(2)*p(0) + q(1)*p(1)),
-                                                         2*(q(3)*p(0) - q(1)*p(2) + q(0)*p(1)),
-                                                         2*(q(3)*p(1) - q(2)*p(2) - q(0)*p(0)),
-                                                         2*(q(1)*p(0) + q(2)*p(1) + q(3)*p(2))));
-
-      // Translation
-      Map<Matrix<double, 2, 3, RowMajor>> dr_dt(jacobians[0] + 8);
-      dr_dt = psi*K + K*gamma*RowVector3d(0, 0, npsi2);
+      jacobians[0][4] = camera_info.focal/(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4));
+      jacobians[0][6] = -camera_info.focal*(t1+q1*(p1*q1-p2*q4+p3*q3)+q3*(-p1*q3+p2*q2+p3*q1)+q2*(p1*q2+p2*q3+p3*q4)-q4*(p2*q1+p1*q4-p3*q2))*1.0/pow(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4),2.0);
+      jacobians[0][12] = camera_info.focal/(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4));
+      jacobians[0][13] = -camera_info.focal*(t2+q1*(p2*q1+p1*q4-p3*q2)-q2*(-p1*q3+p2*q2+p3*q1)+q3*(p1*q2+p2*q3+p3*q4)+q4*(p1*q1-p2*q4+p3*q3))*1.0/pow(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4),2.0);
     }
-    // Jacobians wrt feature position
     if (jacobians[1]) {
-      Map<Matrix<double, 2, 3, RowMajor>> dr_dp(jacobians[1]);
-      dr_dp = K*(psi*LR + npsi2*gamma*RowVector3d(q(1)*q(3) - q(0)*q(2),
-                                                  q(2)*q(3) + q(0)*q(1),
-                                                  q(0)*q(0) + q(3)*q(3) - q(1)*q(1) - q(2)*q(2))); 
+      jacobians[1][0] = (camera_info.focal*(q1*q1+q2*q2-q3*q3-q4*q4))/(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4))+camera_info.focal*(q1*q3*2.0-q2*q4*2.0)*(t1+q1*(p1*q1-p2*q4+p3*q3)+q3*(-p1*q3+p2*q2+p3*q1)+q2*(p1*q2+p2*q3+p3*q4)-q4*(p2*q1+p1*q4-p3*q2))*1.0/pow(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4),2.0);
+      jacobians[1][1] = -(camera_info.focal*(q1*q4*2.0-q2*q3*2.0))/(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4))-camera_info.focal*(q1*q2*2.0+q3*q4*2.0)*(t1+q1*(p1*q1-p2*q4+p3*q3)+q3*(-p1*q3+p2*q2+p3*q1)+q2*(p1*q2+p2*q3+p3*q4)-q4*(p2*q1+p1*q4-p3*q2))*1.0/pow(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4),2.0);
+      jacobians[1][2] = (camera_info.focal*(q1*q3*2.0+q2*q4*2.0))/(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4))-camera_info.focal*(q1*q1-q2*q2-q3*q3+q4*q4)*(t1+q1*(p1*q1-p2*q4+p3*q3)+q3*(-p1*q3+p2*q2+p3*q1)+q2*(p1*q2+p2*q3+p3*q4)-q4*(p2*q1+p1*q4-p3*q2))*1.0/pow(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4),2.0);
+      jacobians[1][3] = (camera_info.focal*(q1*q4*2.0+q2*q3*2.0))/(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4))+camera_info.focal*(q1*q3*2.0-q2*q4*2.0)*(t2+q1*(p2*q1+p1*q4-p3*q2)-q2*(-p1*q3+p2*q2+p3*q1)+q3*(p1*q2+p2*q3+p3*q4)+q4*(p1*q1-p2*q4+p3*q3))*1.0/pow(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4),2.0);
+      jacobians[1][4] = (camera_info.focal*(q1*q1-q2*q2+q3*q3-q4*q4))/(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4))-camera_info.focal*(q1*q2*2.0+q3*q4*2.0)*(t2+q1*(p2*q1+p1*q4-p3*q2)-q2*(-p1*q3+p2*q2+p3*q1)+q3*(p1*q2+p2*q3+p3*q4)+q4*(p1*q1-p2*q4+p3*q3))*1.0/pow(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4),2.0);
+      jacobians[1][5] = -(camera_info.focal*(q1*q2*2.0-q3*q4*2.0))/(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4))-camera_info.focal*(q1*q1-q2*q2-q3*q3+q4*q4)*(t2+q1*(p2*q1+p1*q4-p3*q2)-q2*(-p1*q3+p2*q2+p3*q1)+q3*(p1*q2+p2*q3+p3*q4)+q4*(p1*q1-p2*q4+p3*q3))*1.0/pow(t3+q1*(-p1*q3+p2*q2+p3*q1)+q2*(p2*q1+p1*q4-p3*q2)-q3*(p1*q1-p2*q4+p3*q3)+q4*(p1*q2+p2*q3+p3*q4),2.0);
     }
   }
 

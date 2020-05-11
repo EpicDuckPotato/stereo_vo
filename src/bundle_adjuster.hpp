@@ -129,4 +129,5 @@ class BundleAdjuster
     unique_ptr<ceres::ProductParameterization> se3param;
 
     CameraInfo camera_info;
+    bool new_frame_added;
 };

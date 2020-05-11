@@ -19,6 +19,8 @@ BundleAdjuster::BundleAdjuster(size_t _window_size, CameraInfo info) {
   problem = make_unique<ceres::Problem>(problem_options);
   se3param = make_unique<ceres::ProductParameterization>(new ceres::QuaternionParameterization(),
                                                          new ceres::IdentityParameterization(3));
+
+  new_frame_added = false;
 }
 
 // Remove oldest pose variable from window
@@ -32,8 +34,10 @@ void BundleAdjuster::remove_oldest_pose() {
     // remove it from the feature list.
     if (features[observation.second].refcount == 0) {
       avail_ids.push(observation.second);
+      problem->RemoveParameterBlock(features[observation.second].position);
     }
   }
+  problem->RemoveParameterBlock(oldest_pose->pose);
   pose_window.pop();
 }
 
@@ -81,6 +85,7 @@ void BundleAdjuster::add_keyframe(shared_ptr<Keyframe> keyframe) {
       features[feature_id].position[0] = keyframe->features_3d[i].x;
       features[feature_id].position[1] = keyframe->features_3d[i].y;
       features[feature_id].position[2] = keyframe->features_3d[i].z;
+      features[feature_id].refcount = 0;
 
       keyframe->feature_ids.push_back(feature_id);
     }
@@ -103,26 +108,31 @@ void BundleAdjuster::add_keyframe(shared_ptr<Keyframe> keyframe) {
   }
 
   last_keyframe = keyframe;
+
+  new_frame_added = true;
 }
 
 void BundleAdjuster::bundle_adjust() { 
-  ceres::Solver::Summary summary;
-  ceres::Solve(options, problem.get(), &summary);
+  if (new_frame_added) {
+    ceres::Solver::Summary summary;
+    ceres::Solve(options, problem.get(), &summary);
 
-  shared_ptr<PoseVariable> pose_var = pose_window.back();
-  last_keyframe->orientation.w() = pose_var->pose[0];
-  last_keyframe->orientation.x() = pose_var->pose[1];
-  last_keyframe->orientation.y() = pose_var->pose[2];
-  last_keyframe->orientation.z() = pose_var->pose[3];
-  last_keyframe->position(0) = pose_var->pose[4];
-  last_keyframe->position(1) = pose_var->pose[5];
-  last_keyframe->position(2) = pose_var->pose[6];
-  
-  size_t visible_features = last_keyframe->feature_ids.size();
-  for (size_t i = 0; i < visible_features; i++) {
-    size_t id = last_keyframe->feature_ids[i];
-    last_keyframe->features_3d[i].x = features[id].position[0];
-    last_keyframe->features_3d[i].y = features[id].position[1];
-    last_keyframe->features_3d[i].z = features[id].position[2];
+    shared_ptr<PoseVariable> pose_var = pose_window.back();
+    last_keyframe->orientation.w() = pose_var->pose[0];
+    last_keyframe->orientation.x() = pose_var->pose[1];
+    last_keyframe->orientation.y() = pose_var->pose[2];
+    last_keyframe->orientation.z() = pose_var->pose[3];
+    last_keyframe->position(0) = pose_var->pose[4];
+    last_keyframe->position(1) = pose_var->pose[5];
+    last_keyframe->position(2) = pose_var->pose[6];
+    
+    size_t visible_features = last_keyframe->feature_ids.size();
+    for (size_t i = 0; i < visible_features; i++) {
+      size_t id = last_keyframe->feature_ids[i];
+      last_keyframe->features_3d[i].x = features[id].position[0];
+      last_keyframe->features_3d[i].y = features[id].position[1];
+      last_keyframe->features_3d[i].z = features[id].position[2];
+    }
+    new_frame_added = false;
   }
 }
