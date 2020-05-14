@@ -1,3 +1,6 @@
+#ifndef BUNDLE_ADJUSTER_H_
+#define BUNDLE_ADJUSTER_H_
+
 #include <Eigen/Dense>
 #include <ceres/ceres.h>
 #include <opencv2/opencv.hpp>
@@ -131,3 +134,5 @@ class BundleAdjuster
     CameraInfo camera_info;
     bool new_frame_added;
 };
+
+#endif
