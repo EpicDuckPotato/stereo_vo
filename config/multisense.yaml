@@ -1,7 +1,7 @@
-focal_length: 7.18856e+02
-cx: 6.071928e+02
-cy: 1.852157e+02
-baseline: 0.537165718864418
+focal_length: 476.7030836014194
+cx: 400.5
+cy: 400.5
+baseline: 0.07
 left_topic: "/multisense_sl/camera/left/image_raw"
 right_topic: "/multisense_sl/camera/right/image_raw"
 frame_rate: 30
