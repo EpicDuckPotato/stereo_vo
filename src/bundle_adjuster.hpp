@@ -83,6 +83,11 @@ class BundleAdjuster
     BundleAdjuster(size_t _window_size, CameraInfo info);
 
     /*
+     * ~BundleAdjuster: destructor
+     */
+    ~BundleAdjuster();
+
+    /*
      * get_last_keyframe: return a pointer to the last keyframe passed
      * to this object with add_keyframe
      * RETURN: a pointer to the last keyframe passed

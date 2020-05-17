@@ -23,6 +23,21 @@ BundleAdjuster::BundleAdjuster(size_t _window_size, CameraInfo info) {
   new_frame_added = false;
 }
 
+BundleAdjuster::~BundleAdjuster() {
+  // Free memory for feature positions
+  for (Feature feature : features) {
+    if (feature.position != nullptr) {
+      delete feature.position;
+    }
+  }
+
+  // Free memory for pose variables
+  while (pose_window.size() != 0) {
+    delete pose_window.front()->pose;
+    pose_window.pop();
+  }
+}
+
 // Remove oldest pose variable from window
 void BundleAdjuster::remove_oldest_pose() {
   shared_ptr<PoseVariable> oldest_pose = pose_window.front();
@@ -35,9 +50,11 @@ void BundleAdjuster::remove_oldest_pose() {
     if (features[observation.second].refcount == 0) {
       avail_ids.push(observation.second);
       problem->RemoveParameterBlock(features[observation.second].position);
+      delete features[observation.second].position;
     }
   }
   problem->RemoveParameterBlock(oldest_pose->pose);
+  delete oldest_pose->pose;
   pose_window.pop();
 }
 
