@@ -17,6 +17,7 @@
 #include <nav_msgs/Path.h>
 #include <geometry_msgs/PoseStamped.h>
 #include "bundle_adjuster.hpp"
+#include <string>
 
 using namespace Eigen;
 using namespace std;
@@ -24,75 +25,12 @@ using namespace std;
 typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, 
                                                         sensor_msgs::Image> ApproxSyncPolicy;
 
-// KITTI sequence 00
-static const float focal_length = 7.18856e+02;
-static const float cx = 6.071928e+02;
-static const float cy = 1.852157e+02;
-static const float baseline = 0.537165718864418;
-
-// KITTI sequence 03
-/*
-static const float focal_length = 7.215377e+02;
-static const float cx = 6.095593e+02;
-static const float cy = 1.72854e+02;
-static const float baseline = 0.537150588250621;
-*/
-
-// KITTI sequence 13
-/*
-static const float focal_length = 7.18856e+02;
-static const float cx = 6.071928e+02;
-static const float cy = 1.852157e+02;
-static const float baseline = 0.537165718864418;
-*/
-
-// Realsense d435i
-/*
-static const float focal_length = 385.7544860839844;
-static const float cx = 323.1204833984375;
-static const float cy = 236.7432098388672;
-static const float baseline = 0.05;
-*/
-
-// Realsense r200 (in simulation, the left and right images seem identical?)
-/*
-static const float focal_length = 554.3826904296875;
-static const float cx = 320;
-static const float cy = 240;
-static const float baseline = 0.07;
-*/
-
-// Multisense
-/*
-static const float focal_length = 476.7030836014194;
-static const float cx = 400.5;
-static const float cy = 400.5;
-static const float baseline = 0.07;
-*/
+typedef function<void (const sensor_msgs::ImageConstPtr& left_msg, const sensor_msgs::ImageConstPtr& right_msg)> StereoImageHandler;
 
 static const float parallax_thresh = 20;
 static const float min_feature_distance = 30;
-
-static cv::Mat camera_matrix; // 3x4 camera matrix
-
-static BundleAdjuster bundle_adjuster(5, {focal_length, cx, cy, 0, 0, 0, 0});
-
-// We use the previous transform (i.e. the previous solvePnP output) as the
-// initial guess for the next PnP solution
-static cv::Mat rvec;
-static cv::Mat tvec;
-
-/*
- * right_projection_matrix: computes the projection matrix for the right
- * camera in the stereo pair, given the left matrix
- * ARGUMENTS
- * right_pmat: populated with the right camera's projection matrix
- * left_pmat: left camera's projection matrix
- */
-void right_projection_matrix(cv::Mat &right_pmat, const cv::Mat &left_pmat) {
-  right_pmat = left_pmat.clone();
-  right_pmat.at<float>(0, 3) -= focal_length*baseline;
-}
+static const size_t image_queue_size = 10;
+static const size_t sliding_window_size = 5;
 
 /*
  * triangulate_stereo: triangulates the 3d positions of 2d features
@@ -107,6 +45,8 @@ void right_projection_matrix(cv::Mat &right_pmat, const cv::Mat &left_pmat) {
  * left: left image
  * right: right image
  * left_pmat: projection matrix for left camera in stereo pair
+ * focal_length: focal length
+ * baseline: baseline
  * REQUIRES: features_3d.size() == 0 && matched_features_2d.size() == 0
  * ENSURES: features_3d.size() == matched_features_2d.size()
  */
@@ -115,10 +55,12 @@ void triangulate_stereo(vector<cv::Point3f>& features_3d,
                         const vector<cv::Point2f>& left_features_2d,
                         const cv::Mat& left,
                         const cv::Mat& right,
-                        const cv::Mat& left_pmat) {
+                        const cv::Mat& left_pmat,
+                        float focal_length,
+                        float baseline) {
 
-  cv::Mat right_pmat;
-  right_projection_matrix(right_pmat, left_pmat);
+  cv::Mat right_pmat = left_pmat.clone();
+  right_pmat.at<float>(0, 3) -= focal_length*baseline;
 
   // Get disparity 
   cv::Mat disparity;
@@ -156,231 +98,265 @@ void triangulate_stereo(vector<cv::Point3f>& features_3d,
   }
 }
 
-/*
- * handle_images: As we get image pairs from ROS, we use them for processing only if features
- * from the last keyframe have sufficient parallax with this pair's left image.
- * If so, use previous keyframe's 3d feature positions to solve for current left
- * camera pose via PnP
- * ARGUMENTS
- * left_msg: left image message
- * right_msg: right image message
- */
-void handle_images(const sensor_msgs::ImageConstPtr& left_msg,
-                   const sensor_msgs::ImageConstPtr& right_msg) { 
-  cv_bridge::CvImagePtr left_ptr = cv_bridge::toCvCopy(*left_msg, sensor_msgs::image_encodings::MONO8);
-  cv_bridge::CvImagePtr right_ptr = cv_bridge::toCvCopy(*right_msg, sensor_msgs::image_encodings::MONO8);
+class handle_images {
+  private:
+    shared_ptr<BundleAdjuster> bundle_adjuster;
+    cv::Mat camera_matrix;
+    float baseline;
 
-  // Detect features in left image
-  vector<cv::Point2f> detected_features;
+    // We use the previous transform (i.e. the previous solvePnP output) as the
+    // initial guess for the next PnP solution
+    cv::Mat rvec;
+    cv::Mat tvec;
 
-  // Images from r200 are especially noisy if you don't blur
-  /*
-  cv::GaussianBlur(left_ptr->image, left_ptr->image, cv::Size(3, 3), 1);
-  cv::GaussianBlur(right_ptr->image, right_ptr->image, cv::Size(3, 3), 1);
-  */
+  public:
+    /*
+     * handle_images: constructor
+     * ARGUMENTS
+     * cam_mat: camera_matrix;
+     * adjuster: BundleAdjuster object to add keyframes to 
+     * bline: stereo baseline
+     */
+    handle_images(cv::Mat cam_mat, 
+                  shared_ptr<BundleAdjuster> adjuster,
+                  float bline) : camera_matrix(cam_mat),
+                                 bundle_adjuster(adjuster),
+                                 baseline(bline) {}
 
-  /*
-  vector<cv::KeyPoint> detected_keypoints;
-  cv::FAST(left_ptr->image, detected_keypoints, 40); // better for KITTI
-  //cv::FAST(left_ptr->image, detected_keypoints, 10); // better for d435i in snake bags
+    /*
+     * operator (): as we get image pairs from ROS, we use them for processing only if features
+     * from the last keyframe have sufficient parallax with this pair's left image.
+     * If so, use previous keyframe's 3d feature positions to solve for current left
+     * camera pose via PnP
+     * ARGUMENTS
+     * left_msg: left image message
+     * right_msg: right image message
+     */
+    void operator () (const sensor_msgs::ImageConstPtr& left_msg,
+                      const sensor_msgs::ImageConstPtr& right_msg) { 
+      cv_bridge::CvImagePtr left_ptr = cv_bridge::toCvCopy(*left_msg, sensor_msgs::image_encodings::MONO8);
+      cv_bridge::CvImagePtr right_ptr = cv_bridge::toCvCopy(*right_msg, sensor_msgs::image_encodings::MONO8);
 
-  if (detected_keypoints.size() < 4) {
-    return;
-  }
+      // Detect features in left image
+      vector<cv::Point2f> detected_features;
 
-  cv::KeyPoint::convert(detected_keypoints, detected_features);
-  */
+      // Images from r200 are especially noisy if you don't blur
+      /*
+      cv::GaussianBlur(left_ptr->image, left_ptr->image, cv::Size(3, 3), 1);
+      cv::GaussianBlur(right_ptr->image, right_ptr->image, cv::Size(3, 3), 1);
+      */
 
-  cv::goodFeaturesToTrack(left_ptr->image, detected_features, 300, 0.01, min_feature_distance);
-  if (detected_features.size() < 4) {
-    return;
-  }
+      /*
+      vector<cv::KeyPoint> detected_keypoints;
+      cv::FAST(left_ptr->image, detected_keypoints, 40); // better for KITTI
+      //cv::FAST(left_ptr->image, detected_keypoints, 10); // better for d435i in snake bags
 
-  shared_ptr<Keyframe> last_keyframe = bundle_adjuster.get_last_keyframe();
-
-  // If we don't have any keyframes, make this the first one
-  if (last_keyframe == nullptr) {
-    vector<cv::Point3f> features_3d;
-    vector<cv::Point2f> matched_features_2d;
-
-    triangulate_stereo(features_3d,
-                       matched_features_2d,
-                       detected_features,
-                       left_ptr->image,
-                       right_ptr->image,
-                       camera_matrix);
-
-    shared_ptr<Keyframe> new_keyframe = make_shared<Keyframe>(Vector3f::Zero(),
-                                                              Quaternionf::Identity(),
-                                                              left_ptr->image,
-                                                              matched_features_2d,
-                                                              features_3d,
-                                                              vector<size_t>());
-
-    bundle_adjuster.add_keyframe(new_keyframe);
-    
-    tvec = cv::Mat::zeros(3, 1, CV_32F);
-    rvec = cv::Mat::zeros(3, 1, CV_32F);
-
-    return;
-  }
-
-  // Track features between last keyframe and current frame
-  vector<uchar> status;
-  vector<float> err;
-  vector<cv::Point2f> tracked_features;
-  cv::calcOpticalFlowPyrLK(last_keyframe->image, left_ptr->image, last_keyframe->features_2d, tracked_features, status,
-                           err, cv::Size(21, 21), 3,
-                           cv::TermCriteria(cv::TermCriteria::COUNT+cv::TermCriteria::EPS, 30, 0.01),
-                           0, 1e-4);
-
-  size_t num_features = tracked_features.size();
-
-  // We might've lost some features. Therefore, create vectors of valid features for PnP. Also,
-  // check average parallax. If it's less than a threshold, don't use this frame as a keyframe
-  vector<cv::Point2f> valid_tracked_features;
-  vector<cv::Point3f> valid_features_3d;
-  vector<size_t> valid_ids; 
-
-  float av_parallax;
-  for (size_t i = 0; i < num_features; i++) {
-    if (status[i]) {
-      valid_tracked_features.push_back(tracked_features[i]);
-      valid_features_3d.push_back(last_keyframe->features_3d[i]);
-      valid_ids.push_back(last_keyframe->feature_ids[i]);
-
-      float dx = tracked_features[i].x - last_keyframe->features_2d[i].x;
-      float dy = tracked_features[i].y - last_keyframe->features_2d[i].y;
-
-      av_parallax += sqrt(dx*dx + dy*dy);
-    }
-  }
-  num_features = valid_tracked_features.size();
-  av_parallax /= num_features;
-
-  if (av_parallax <= parallax_thresh) {
-    return;
-  }
-
-  // Use PnP to get pose of world frame with respect to the current camera frame
-  cv::Mat inlier_indices;
-  solvePnPRansac(valid_features_3d,
-                 valid_tracked_features,
-                 camera_matrix.colRange(0, 3),
-                 cv::Mat::zeros(4, 1, CV_32F),
-                 rvec, tvec, true, 100, 8.0, 0.99, inlier_indices);
-
-  size_t num_inliers = inlier_indices.rows;
-
-  cv::Mat rmat;
-  cv::Rodrigues(rvec, rmat);
-
-  Matrix3f rmat_eigen;
-  Vector3f tvec_eigen;
-  cv::cv2eigen(rmat, rmat_eigen);
-  cv::cv2eigen(tvec, tvec_eigen);
-
-  Quaternionf orientation(rmat_eigen);
-
-  // Allocate memory for new keyframe
-  shared_ptr<Keyframe> new_keyframe = make_shared<Keyframe>(tvec_eigen,
-                                                            orientation,
-                                                            left_ptr->image,
-                                                            vector<cv::Point2f>(num_inliers),
-                                                            vector<cv::Point3f>(num_inliers),
-                                                            vector<size_t>(num_inliers));
-
-  // Populate new keyframe's features with inliers
-  for (size_t i = 0; i < num_inliers; i++) {
-    size_t idx = inlier_indices.at<int>(i, 0);
-    new_keyframe->feature_ids[i] = valid_ids[idx];
-    new_keyframe->features_2d[i] = valid_tracked_features[idx];
-    new_keyframe->features_3d[i] = valid_features_3d[idx];
-  }
-
-  // Now we need to triangulate newly detected features. However, many of these
-  // features are probably the same ones we're already tracking. Therefore, filter
-  // those out, then triangulate
-  num_features = detected_features.size();
-  vector<cv::Point2f> new_features;
-  for (size_t i = 0; i < num_features; i++) {
-    bool tracked = false;
-    for (size_t j = 0; j < num_inliers; j++) {
-      float dx = detected_features[i].x - new_keyframe->features_2d[j].x;
-      float dy = detected_features[i].y - new_keyframe->features_2d[j].y;
-      if (sqrt(dx*dx + dy*dy) < min_feature_distance) {
-        tracked = true;
-        break;
+      if (detected_keypoints.size() < 4) {
+        return;
       }
+
+      cv::KeyPoint::convert(detected_keypoints, detected_features);
+      */
+
+      cv::goodFeaturesToTrack(left_ptr->image, detected_features, 300, 0.01, min_feature_distance);
+      if (detected_features.size() < 4) {
+        return;
+      }
+
+      shared_ptr<Keyframe> last_keyframe = bundle_adjuster->get_last_keyframe();
+
+      // If we don't have any keyframes, make this the first one
+      if (last_keyframe == nullptr) {
+        vector<cv::Point3f> features_3d;
+        vector<cv::Point2f> matched_features_2d;
+
+        triangulate_stereo(features_3d,
+                           matched_features_2d,
+                           detected_features,
+                           left_ptr->image,
+                           right_ptr->image,
+                           camera_matrix,
+                           camera_matrix.at<float>(0, 0),
+                           baseline);
+
+        shared_ptr<Keyframe> new_keyframe = make_shared<Keyframe>(Vector3f::Zero(),
+                                                                  Quaternionf::Identity(),
+                                                                  left_ptr->image,
+                                                                  matched_features_2d,
+                                                                  features_3d,
+                                                                  vector<size_t>());
+
+        bundle_adjuster->add_keyframe(new_keyframe);
+        
+        tvec = cv::Mat::zeros(3, 1, CV_32F);
+        rvec = cv::Mat::zeros(3, 1, CV_32F);
+
+        return;
+      }
+
+      // Track features between last keyframe and current frame
+      vector<uchar> status;
+      vector<float> err;
+      vector<cv::Point2f> tracked_features;
+      cv::calcOpticalFlowPyrLK(last_keyframe->image, left_ptr->image, last_keyframe->features_2d, tracked_features, status,
+                               err, cv::Size(21, 21), 3,
+                               cv::TermCriteria(cv::TermCriteria::COUNT+cv::TermCriteria::EPS, 30, 0.01),
+                               0, 1e-4);
+
+      size_t num_features = tracked_features.size();
+
+      // We might've lost some features. Therefore, create vectors of valid features for PnP. Also,
+      // check average parallax. If it's less than a threshold, don't use this frame as a keyframe
+      vector<cv::Point2f> valid_tracked_features;
+      vector<cv::Point3f> valid_features_3d;
+      vector<size_t> valid_ids; 
+
+      float av_parallax;
+      for (size_t i = 0; i < num_features; i++) {
+        if (status[i]) {
+          valid_tracked_features.push_back(tracked_features[i]);
+          valid_features_3d.push_back(last_keyframe->features_3d[i]);
+          valid_ids.push_back(last_keyframe->feature_ids[i]);
+
+          float dx = tracked_features[i].x - last_keyframe->features_2d[i].x;
+          float dy = tracked_features[i].y - last_keyframe->features_2d[i].y;
+
+          av_parallax += sqrt(dx*dx + dy*dy);
+        }
+      }
+      num_features = valid_tracked_features.size();
+      av_parallax /= num_features;
+
+      if (av_parallax <= parallax_thresh) {
+        return;
+      }
+
+      // Use PnP to get pose of world frame with respect to the current camera frame
+      cv::Mat inlier_indices;
+      solvePnPRansac(valid_features_3d,
+                     valid_tracked_features,
+                     camera_matrix.colRange(0, 3),
+                     cv::Mat::zeros(4, 1, CV_32F),
+                     rvec, tvec, true, 100, 8.0, 0.99, inlier_indices);
+
+      size_t num_inliers = inlier_indices.rows;
+
+      cv::Mat rmat;
+      cv::Rodrigues(rvec, rmat);
+
+      Matrix3f rmat_eigen;
+      Vector3f tvec_eigen;
+      cv::cv2eigen(rmat, rmat_eigen);
+      cv::cv2eigen(tvec, tvec_eigen);
+
+      Quaternionf orientation(rmat_eigen);
+
+      // Allocate memory for new keyframe
+      shared_ptr<Keyframe> new_keyframe = make_shared<Keyframe>(tvec_eigen,
+                                                                orientation,
+                                                                left_ptr->image,
+                                                                vector<cv::Point2f>(num_inliers),
+                                                                vector<cv::Point3f>(num_inliers),
+                                                                vector<size_t>(num_inliers));
+
+      // Populate new keyframe's features with inliers
+      for (size_t i = 0; i < num_inliers; i++) {
+        size_t idx = inlier_indices.at<int>(i, 0);
+        new_keyframe->feature_ids[i] = valid_ids[idx];
+        new_keyframe->features_2d[i] = valid_tracked_features[idx];
+        new_keyframe->features_3d[i] = valid_features_3d[idx];
+      }
+
+      // Now we need to triangulate newly detected features. However, many of these
+      // features are probably the same ones we're already tracking. Therefore, filter
+      // those out, then triangulate
+      num_features = detected_features.size();
+      vector<cv::Point2f> new_features;
+      for (size_t i = 0; i < num_features; i++) {
+        bool tracked = false;
+        for (size_t j = 0; j < num_inliers; j++) {
+          float dx = detected_features[i].x - new_keyframe->features_2d[j].x;
+          float dy = detected_features[i].y - new_keyframe->features_2d[j].y;
+          if (sqrt(dx*dx + dy*dy) < min_feature_distance) {
+            tracked = true;
+            break;
+          }
+        }
+        if (!tracked) {
+          new_features.push_back(detected_features[i]);
+        }
+      }
+
+      vector<cv::Point3f> new_features_3d;
+      vector<cv::Point2f> matched_new_features;
+
+      cv::Mat hmat = cv::Mat::eye(4, 4, CV_32F);
+      rmat.copyTo(hmat(cv::Rect(0, 0, 3, 3)));
+      tvec.copyTo(hmat(cv::Rect(3, 0, 1, 3)));
+
+      // Triangulate 3d points for detected features
+      triangulate_stereo(new_features_3d,
+                         matched_new_features,
+                         new_features,
+                         left_ptr->image,
+                         right_ptr->image,
+                         camera_matrix*hmat,
+                         camera_matrix.at<float>(0, 0),
+                         baseline);
+
+      new_keyframe->features_2d.insert(new_keyframe->features_2d.end(), 
+                                       make_move_iterator(matched_new_features.begin()),
+                                       make_move_iterator(matched_new_features.end()));
+
+      new_keyframe->features_3d.insert(new_keyframe->features_3d.end(), 
+                                       make_move_iterator(new_features_3d.begin()),
+                                       make_move_iterator(new_features_3d.end()));
+
+      bundle_adjuster->add_keyframe(new_keyframe);
     }
-    if (!tracked) {
-      new_features.push_back(detected_features[i]);
-    }
-  }
-
-  vector<cv::Point3f> new_features_3d;
-  vector<cv::Point2f> matched_new_features;
-
-  cv::Mat hmat = cv::Mat::eye(4, 4, CV_32F);
-  rmat.copyTo(hmat(cv::Rect(0, 0, 3, 3)));
-  tvec.copyTo(hmat(cv::Rect(3, 0, 1, 3)));
-
-  // Triangulate 3d points for detected features
-  triangulate_stereo(new_features_3d,
-                     matched_new_features,
-                     new_features,
-                     left_ptr->image,
-                     right_ptr->image,
-                     camera_matrix*hmat);
-
-  new_keyframe->features_2d.insert(new_keyframe->features_2d.end(), 
-                                   make_move_iterator(matched_new_features.begin()),
-                                   make_move_iterator(matched_new_features.end()));
-
-  new_keyframe->features_3d.insert(new_keyframe->features_3d.end(), 
-                                   make_move_iterator(new_features_3d.begin()),
-                                   make_move_iterator(new_features_3d.end()));
-
-  bundle_adjuster.add_keyframe(new_keyframe);
-}
+};
 
 int main(int argc, char **argv) {
   ros::init(argc, argv, "vo_node");
   ros::NodeHandle n("~");
 
-  // Synchronize subscribers to left and right images
+  // Camera intrinsics
+  float focal_length;
+  float cx;
+  float cy;
+  float baseline;
 
-  // KITTI topic
-  message_filters::Subscriber<sensor_msgs::Image> left_sub(n, "/leftImage", 10);
-  message_filters::Subscriber<sensor_msgs::Image> right_sub(n, "/rightImage", 10);
+  // ROS info
+  string left_topic;
+  string right_topic;
+  int frame_rate;
 
-  // d435i topic
-  /*
-  message_filters::Subscriber<sensor_msgs::Image> left_sub(n, "/camera/infra1/image_rect_raw", 3);
-  message_filters::Subscriber<sensor_msgs::Image> right_sub(n, "/camera/infra2/image_rect_raw", 3);
-  */
+  n.getParam("/focal_length", focal_length);
+  n.getParam("/cx", cx);
+  n.getParam("/cy", cy);
+  n.getParam("/baseline", baseline);
+  n.getParam("/left_topic", left_topic);
+  n.getParam("/right_topic", right_topic);
+  n.getParam("/frame_rate", frame_rate);
 
-  // r200 topic
-  /*
-  message_filters::Subscriber<sensor_msgs::Image> left_sub(n, "/snake_r200/camera/ir/image_raw", 3);
-  message_filters::Subscriber<sensor_msgs::Image> right_sub(n, "/snake_r200/camera/ir2/image_raw", 3);
-  */
-
-  // multisense topic
-  /*
-  message_filters::Subscriber<sensor_msgs::Image> left_sub(n, "/multisense_sl/camera/left/image_raw", 3);
-  message_filters::Subscriber<sensor_msgs::Image> right_sub(n, "/multisense_sl/camera/right/image_raw", 3);
-  */
-
-  message_filters::Synchronizer<ApproxSyncPolicy> sync(ApproxSyncPolicy(10), left_sub, right_sub);
-  sync.registerCallback(boost::bind(&handle_images, _1, _2));
+  message_filters::Subscriber<sensor_msgs::Image> left_sub(n, left_topic, image_queue_size);
+  message_filters::Subscriber<sensor_msgs::Image> right_sub(n, right_topic, image_queue_size);
 
   // Populate camera matrix with intrinsics
-  camera_matrix = cv::Mat::eye(3, 4, CV_32F);
+  cv::Mat camera_matrix = cv::Mat::eye(3, 4, CV_32F);
   camera_matrix.at<float>(0, 0) = focal_length;
   camera_matrix.at<float>(0, 2) = cx;
   camera_matrix.at<float>(1, 1) = focal_length;
   camera_matrix.at<float>(1, 2) = cy;
+
+  CameraInfo info = {focal_length, cx, cy, 0, 0, 0, 0, baseline};
+
+  shared_ptr<BundleAdjuster> bundle_adjuster = make_shared<BundleAdjuster>(sliding_window_size, info);
+
+  // Synchronize subscribers to left and right images
+  message_filters::Synchronizer<ApproxSyncPolicy> sync(ApproxSyncPolicy(10), left_sub, right_sub);
+  StereoImageHandler image_handler = handle_images(camera_matrix, bundle_adjuster, baseline);
+  sync.registerCallback(bind(image_handler, _1, _2));
 
   tf2_ros::TransformBroadcaster br;
 
@@ -392,8 +368,8 @@ int main(int argc, char **argv) {
 
   ros::Rate r(20);
   while (ros::ok()) {
-    if (bundle_adjuster.get_last_keyframe() != nullptr) {
-      shared_ptr<Keyframe> keyframe = bundle_adjuster.get_last_keyframe();
+    if (bundle_adjuster->get_last_keyframe() != nullptr) {
+      shared_ptr<Keyframe> keyframe = bundle_adjuster->get_last_keyframe();
       Quaternionf orientation = keyframe->orientation.conjugate();
       Vector3f position = orientation*(-keyframe->position);
 
@@ -465,7 +441,7 @@ int main(int argc, char **argv) {
       marker_pub.publish(marker);
       */
 
-      bundle_adjuster.bundle_adjust();
+      bundle_adjuster->bundle_adjust();
     }
 
     r.sleep();

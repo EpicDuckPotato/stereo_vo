@@ -12,6 +12,9 @@ struct CameraInfo {
   double k2;
   double p1;
   double p2;
+
+  // Baseline
+  double baseline;
 };
 
 #endif

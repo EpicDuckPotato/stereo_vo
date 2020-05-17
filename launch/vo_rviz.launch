@@ -1,3 +1,9 @@
 <launch>
+    <arg name="config"/>
+
+    <rosparam file="$(find vo_practice)/config/$(arg config).yaml" />
+
     <node name="rvizvisualisation" pkg="rviz" type="rviz" output="log" args="-d $(find vo_practice)/config/rviz_config.rviz" />
+    
+    <node name="vo_node" pkg="vo_practice" type="vo_node" output="screen"/>
 </launch>
