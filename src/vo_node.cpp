@@ -29,21 +29,20 @@ typedef function<void (const sensor_msgs::ImageConstPtr& left_msg, const sensor_
 
 static const float parallax_thresh = 20;
 static const float min_feature_distance = 30;
-static const size_t image_queue_size = 10;
+static const size_t image_queue_size = 3;
 static const size_t sliding_window_size = 5;
 
 /*
  * triangulate_stereo: triangulates the 3d positions of 2d features
  * ARGUMENTS
  * features_3d: populated with the 3d positions of any features in
- * left_features_2d that can be triangulated
+ * left_keypoints that can be triangulated
  * matched_features_2d: not all features will be present in both
  * the left and right images, which is a condition necessary for
  * triangulation. This vector is populated with all
  * 2d feature positions that were able to take part in triangulation
- * left_features_2d: 2d positions in left image to triangulate
- * left: left image
- * right: right image
+ * left_keypoints: keypoints in left image to triangulate
+ * right_keypoints: keypoints in right image to triangulate
  * left_pmat: projection matrix for left camera in stereo pair
  * focal_length: focal length
  * baseline: baseline
@@ -52,9 +51,10 @@ static const size_t sliding_window_size = 5;
  */
 void triangulate_stereo(vector<cv::Point3f>& features_3d,
                         vector<cv::Point2f>& matched_features_2d,
-                        const vector<cv::Point2f>& left_features_2d,
-                        const cv::Mat& left,
-                        const cv::Mat& right,
+                        const vector<cv::KeyPoint>& left_keypoints,
+                        const vector<cv::KeyPoint>& right_keypoints,
+                        const cv::Mat& left_descriptors,
+                        const cv::Mat& right_descriptors,
                         const cv::Mat& left_pmat,
                         float focal_length,
                         float baseline) {
@@ -62,28 +62,22 @@ void triangulate_stereo(vector<cv::Point3f>& features_3d,
   cv::Mat right_pmat = left_pmat.clone();
   right_pmat.at<float>(0, 3) -= focal_length*baseline;
 
-  // Get disparity 
-  cv::Mat disparity;
-  cv::Ptr<cv::StereoBM> sbm = cv::StereoBM::create(16*3, 21);
-  sbm->compute(left, right, disparity);
-  disparity.convertTo(disparity, CV_32F, 1.0/16);
-
-  size_t num_features = left_features_2d.size();
-
-  // Determine which features have a valid disparity, and track
-  // them into the right image
+  cv::BFMatcher matcher(cv::NORM_HAMMING);
+  vector<cv::DMatch> matches;
+  matcher.match(left_descriptors, right_descriptors, matches);
   vector<cv::Point2f> right_features_2d;
-  for (size_t i = 0; i < num_features; i++) {
-    float disp = disparity.at<float>(left_features_2d[i].y,
-                                     left_features_2d[i].x);
-    if (disp > 0) {
-      matched_features_2d.push_back(left_features_2d[i]);
-      right_features_2d.push_back(left_features_2d[i] - cv::Point2f(disp, 0));
+  for (cv::DMatch match : matches) {
+    int left_index = match.queryIdx;
+    int right_index = match.trainIdx;
+    if (abs(left_keypoints[left_index].pt.y - right_keypoints[right_index].pt.y) < 2.0 &&
+        match.distance > 2.0) {
+      matched_features_2d.push_back(left_keypoints[left_index].pt);
+      right_features_2d.push_back(right_keypoints[right_index].pt);
     }
   }
 
   // Triangulate 3d positions of features that could be tracked
-  num_features = matched_features_2d.size();
+  size_t num_features = matched_features_2d.size();
   cv::Mat points_homogeneous = cv::Mat::zeros(4, num_features, CV_32F);
   if (num_features > 0) {
     cv::triangulatePoints(left_pmat, right_pmat, matched_features_2d,
@@ -109,6 +103,9 @@ class handle_images {
     cv::Mat rvec;
     cv::Mat tvec;
 
+    cv::Ptr<cv::ORB> detector;
+    cv::Mat orb_mask;
+
   public:
     /*
      * handle_images: constructor
@@ -121,7 +118,9 @@ class handle_images {
                   shared_ptr<BundleAdjuster> adjuster,
                   float bline) : camera_matrix(cam_mat),
                                  bundle_adjuster(adjuster),
-                                 baseline(bline) {}
+                                 baseline(bline) {
+      detector = cv::ORB::create(400, 1.2f, 3, 21, 0, 2, cv::ORB::HARRIS_SCORE, 31, 40); 
+    }
 
     /*
      * operator (): as we get image pairs from ROS, we use them for processing only if features
@@ -137,31 +136,20 @@ class handle_images {
       cv_bridge::CvImagePtr left_ptr = cv_bridge::toCvCopy(*left_msg, sensor_msgs::image_encodings::MONO8);
       cv_bridge::CvImagePtr right_ptr = cv_bridge::toCvCopy(*right_msg, sensor_msgs::image_encodings::MONO8);
 
+      if (orb_mask.empty()) {
+        orb_mask = 255*cv::Mat::ones(left_ptr->image.rows, left_ptr->image.cols, CV_8UC1);
+      }
+
       // Detect features in left image
       vector<cv::Point2f> detected_features;
 
-      // Images from r200 are especially noisy if you don't blur
-      /*
-      cv::GaussianBlur(left_ptr->image, left_ptr->image, cv::Size(3, 3), 1);
-      cv::GaussianBlur(right_ptr->image, right_ptr->image, cv::Size(3, 3), 1);
-      */
+      vector<cv::KeyPoint> left_keypoints;
+      vector<cv::KeyPoint> right_keypoints;
+      cv::Mat left_descriptors;
+      cv::Mat right_descriptors;
 
-      /*
-      vector<cv::KeyPoint> detected_keypoints;
-      cv::FAST(left_ptr->image, detected_keypoints, 40); // better for KITTI
-      //cv::FAST(left_ptr->image, detected_keypoints, 10); // better for d435i in snake bags
-
-      if (detected_keypoints.size() < 4) {
-        return;
-      }
-
-      cv::KeyPoint::convert(detected_keypoints, detected_features);
-      */
-
-      cv::goodFeaturesToTrack(left_ptr->image, detected_features, 300, 0.01, min_feature_distance);
-      if (detected_features.size() < 4) {
-        return;
-      }
+      detector->detectAndCompute(left_ptr->image, orb_mask, left_keypoints, left_descriptors); 
+      detector->detectAndCompute(right_ptr->image, orb_mask, right_keypoints, right_descriptors); 
 
       shared_ptr<Keyframe> last_keyframe = bundle_adjuster->get_last_keyframe();
 
@@ -172,9 +160,10 @@ class handle_images {
 
         triangulate_stereo(features_3d,
                            matched_features_2d,
-                           detected_features,
-                           left_ptr->image,
-                           right_ptr->image,
+                           left_keypoints,
+                           right_keypoints,
+                           left_descriptors,
+                           right_descriptors,
                            camera_matrix,
                            camera_matrix.at<float>(0, 0),
                            baseline);
@@ -270,20 +259,22 @@ class handle_images {
       // Now we need to triangulate newly detected features. However, many of these
       // features are probably the same ones we're already tracking. Therefore, filter
       // those out, then triangulate
-      num_features = detected_features.size();
-      vector<cv::Point2f> new_features;
+      num_features = left_keypoints.size();
+      vector<cv::KeyPoint> new_left_keypoints;
+      cv::Mat new_left_descriptors;
       for (size_t i = 0; i < num_features; i++) {
         bool tracked = false;
         for (size_t j = 0; j < num_inliers; j++) {
-          float dx = detected_features[i].x - new_keyframe->features_2d[j].x;
-          float dy = detected_features[i].y - new_keyframe->features_2d[j].y;
+          float dx = left_keypoints[i].pt.x - new_keyframe->features_2d[j].x;
+          float dy = left_keypoints[i].pt.y - new_keyframe->features_2d[j].y;
           if (sqrt(dx*dx + dy*dy) < min_feature_distance) {
             tracked = true;
             break;
           }
         }
         if (!tracked) {
-          new_features.push_back(detected_features[i]);
+          new_left_keypoints.push_back(left_keypoints[i]);
+          new_left_descriptors.push_back(left_descriptors.row(i));
         }
       }
 
@@ -297,9 +288,10 @@ class handle_images {
       // Triangulate 3d points for detected features
       triangulate_stereo(new_features_3d,
                          matched_new_features,
-                         new_features,
-                         left_ptr->image,
-                         right_ptr->image,
+                         new_left_keypoints,
+                         right_keypoints,
+                         new_left_descriptors,
+                         right_descriptors,
                          camera_matrix*hmat,
                          camera_matrix.at<float>(0, 0),
                          baseline);

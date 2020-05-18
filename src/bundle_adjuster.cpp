@@ -124,6 +124,8 @@ void BundleAdjuster::add_keyframe(shared_ptr<Keyframe> keyframe) {
     remove_oldest_pose();
   }
 
+  problem->SetParameterBlockConstant(pose_window.front()->pose);
+
   last_keyframe = keyframe;
 
   new_frame_added = true;
