@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(vo_practice)
+project(stereo_vo)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
@@ -113,7 +113,7 @@ find_package(Ceres REQUIRED)
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
 #  INCLUDE_DIRS include
-#  LIBRARIES vo_practice
+#  LIBRARIES stereo_vo
 #  CATKIN_DEPENDS cv_bridge geometry_msgs roscpp sensor_msgs std_msgs
 #  DEPENDS system_lib
 )
@@ -212,7 +212,7 @@ target_link_libraries(kitti_node ${catkin_LIBRARIES})
 #############
 
 ## Add gtest based cpp test target and link libraries
-# catkin_add_gtest(${PROJECT_NAME}-test test/test_vo_practice.cpp)
+# catkin_add_gtest(${PROJECT_NAME}-test test/test_stereo_vo.cpp)
 # if(TARGET ${PROJECT_NAME}-test)
 #   target_link_libraries(${PROJECT_NAME}-test ${PROJECT_NAME})
 # endif()
