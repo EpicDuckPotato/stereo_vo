@@ -41,7 +41,7 @@ void FeatureTracker::track_features(float &av_parallax, float &percent_lost, con
   }
 
   av_parallax /= (float)num_features;
-  percent_lost = feature_set.size()/(float)(initial_features.size());
+  percent_lost = 1.0 - feature_set.size()/(float)(initial_features.size());
 
   last_image = image.clone();
 }
@@ -55,6 +55,8 @@ void FeatureTracker::draw_track(cv::Mat &track) {
   track = initial_image.clone();
   size_t num_features = feature_set.size();
   for (size_t i = 0; i < num_features; i++) {
-    cv::arrowedLine(track, initial_features.at(feature_ids[i]), feature_set[i], CV_RGB(255, 255, 255), 4);
+    cv::Point2f direction = feature_set[i] - initial_features.at(feature_ids[i]);
+    cv::arrowedLine(track, initial_features.at(feature_ids[i]),
+                    initial_features.at(feature_ids[i]) + direction, CV_RGB(255, 255, 255), 4);
   }
 }
