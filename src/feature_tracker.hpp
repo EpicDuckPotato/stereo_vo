@@ -24,8 +24,11 @@ class FeatureTracker {
      * av_parallax: populated with average parallax of features from their initial image
      * percent_lost: populated with total percentage of features lost from the initial image
      * image: image into which we track the current feature set
+     * flow_back: should we calculate optical flow in reverse as well? Potentially increases
+     *            tracking accuracy in return for increased computation           
      */
-    void track_features(float &av_parallax, float &percent_lost, const cv::Mat &image);
+    void track_features(float &av_parallax, float &percent_lost, const cv::Mat &image,
+                        bool flow_back);
 
     /* 
      * get_tracked_features: gets the current 2d positions of the tracked feature

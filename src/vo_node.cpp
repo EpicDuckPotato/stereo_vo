@@ -193,7 +193,7 @@ class handle_images {
 
       float av_parallax = 0;
       float percent_lost = 0;
-      feature_tracker->track_features(av_parallax, percent_lost, left_ptr->image);
+      feature_tracker->track_features(av_parallax, percent_lost, left_ptr->image, true);
       if (av_parallax <= parallax_thresh && percent_lost < 0.4) {
         return;
       }

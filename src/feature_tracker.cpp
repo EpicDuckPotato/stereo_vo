@@ -15,21 +15,34 @@ void FeatureTracker::init(const cv::Mat &image, const vector<cv::Point2f> &featu
   initial_image = last_image;
 }
 
-void FeatureTracker::track_features(float &av_parallax, float &percent_lost, const cv::Mat &image) {
-  vector<uchar> status;
+void FeatureTracker::track_features(float &av_parallax, float &percent_lost, const cv::Mat &image,
+                                    bool flow_back) {
+  vector<uchar> status1;
   vector<float> err;
   vector<cv::Point2f> tracked_features;
-  cv::calcOpticalFlowPyrLK(last_image, image, feature_set, tracked_features, status,
+  cv::calcOpticalFlowPyrLK(last_image, image, feature_set, tracked_features, status1,
                            err, cv::Size(21, 21), 3,
                            cv::TermCriteria(cv::TermCriteria::COUNT+cv::TermCriteria::EPS, 30, 0.01),
                            0, 1e-4);
+
+  vector<uchar> status2;
+  vector<cv::Point2f> reverse_track;
+  
+  if (flow_back) {
+    cv::calcOpticalFlowPyrLK(image, last_image, tracked_features, reverse_track, status2,
+                             err, cv::Size(21, 21), 3,
+                             cv::TermCriteria(cv::TermCriteria::COUNT+cv::TermCriteria::EPS, 30, 0.01),
+                             0, 1e-4);
+  }
 
   feature_set.clear();
   feature_ids.clear();
   av_parallax = 0;
   size_t num_features = tracked_features.size();
   for (size_t i = 0; i < num_features; i++) {
-    if (status[i]) {
+    if (status1[i] && 
+        (!flow_back || 
+         (status2[i] && cv::norm(feature_set[i] - reverse_track[i]) < 2))) {
       feature_set.push_back(tracked_features[i]);
       feature_ids.push_back(feature_ids[i]);
 
