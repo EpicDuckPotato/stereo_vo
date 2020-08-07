@@ -115,6 +115,14 @@ class BundleAdjuster
      * to get_last_keyframe will reflect the optimization
      */
     void bundle_adjust();
+
+    /*
+     * get_world_points: gets world points associated with the given ids
+     * ARGUMENTS
+     * world_points: populated with world points
+     * ids: ids of the world points to get
+     */
+    void get_world_points(vector<cv::Point3f> &world_points, const vector<size_t> &ids);
   private:
     /*
      * remove_oldest_pose: removes the oldest pose from the bundle adjustment window

@@ -136,6 +136,10 @@ void BundleAdjuster::bundle_adjust() {
     ceres::Solver::Summary summary;
     ceres::Solve(options, problem.get(), &summary);
 
+    if (summary.termination_type == ceres::TerminationType::NO_CONVERGENCE) {
+      std::cout << "Solver didn't converge!" << std::endl;
+    }
+
     shared_ptr<PoseVariable> pose_var = pose_window.back();
     last_keyframe->orientation.w() = pose_var->pose[0];
     last_keyframe->orientation.x() = pose_var->pose[1];
@@ -153,5 +157,11 @@ void BundleAdjuster::bundle_adjust() {
       last_keyframe->features_3d[i].z = features[id].position[2];
     }
     new_frame_added = false;
+  }
+}
+
+void BundleAdjuster::get_world_points(vector<cv::Point3f> &world_points, const vector<size_t> &ids) {
+  for (vector<size_t>::const_iterator it = ids.begin(); it != ids.end(); ++it) {
+    world_points.push_back(cv::Point3f(features[*it].position[0], features[*it].position[1], features[*it].position[2]));
   }
 }
