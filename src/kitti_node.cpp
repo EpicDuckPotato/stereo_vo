@@ -16,8 +16,15 @@ using namespace Eigen;
 static const string data_path = "/home/noopygbhat/CMU/biorobotics/kitti_odom_datasets/";
 
 int main(int argc, char** argv) {
+  int sequence_int;
   ros::init(argc, argv, "kitti_node");
   ros::NodeHandle n("~");
+
+  n.getParam("sequence", sequence_int);
+  string sequence = to_string(sequence_int);
+  if (sequence_int < 10) {
+    sequence = "0" + sequence;
+  }
 
   ros::Publisher left_pub = n.advertise<sensor_msgs::Image>("/leftImage", 100);
   ros::Publisher right_pub = n.advertise<sensor_msgs::Image>("/rightImage", 100);
@@ -27,7 +34,7 @@ int main(int argc, char** argv) {
   cv::Mat left, right;
 
   // Ground truth file
-  ifstream gt(data_path + "data_odometry_poses/dataset/poses/00.txt");
+  ifstream gt(data_path + "data_odometry_poses/dataset/poses/" + sequence + ".txt");
 
   Matrix3d R;
   Vector3d t;
@@ -57,8 +64,8 @@ int main(int argc, char** argv) {
         prefix = "00";
       }
 
-      left = cv::imread(data_path + "00/image_0/" + prefix + to_string(i) + ".png", CV_LOAD_IMAGE_GRAYSCALE);
-      right = cv::imread(data_path + "00/image_1/" + prefix + to_string(i) + ".png", CV_LOAD_IMAGE_GRAYSCALE);
+      left = cv::imread(data_path + sequence + "/image_0/" + prefix + to_string(i) + ".png", CV_LOAD_IMAGE_GRAYSCALE);
+      right = cv::imread(data_path + sequence + "/image_1/" + prefix + to_string(i) + ".png", CV_LOAD_IMAGE_GRAYSCALE);
       sensor_msgs::ImagePtr left_msg = cv_bridge::CvImage(std_msgs::Header(), "mono8", left).toImageMsg();
       left_msg->header.stamp = ros::Time::now();
 
