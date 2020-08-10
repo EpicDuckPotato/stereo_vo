@@ -355,6 +355,7 @@ int main(int argc, char **argv) {
   ros::Rate r(20);
   while (ros::ok()) {
     if (bundle_adjuster->get_last_keyframe() != nullptr) {
+      bundle_adjuster->bundle_adjust();
       shared_ptr<Keyframe> keyframe = bundle_adjuster->get_last_keyframe();
       Quaternionf orientation = keyframe->orientation.conjugate();
       Vector3f position = orientation*(-keyframe->position);
@@ -430,7 +431,6 @@ int main(int argc, char **argv) {
  
       marker_pub.publish(marker);
       */
-      bundle_adjuster->bundle_adjust();
     }
 
     r.sleep();
