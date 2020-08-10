@@ -71,17 +71,19 @@ void FeatureTracker::get_tracked_features(vector<cv::Point2f> &features, vector<
 
 void FeatureTracker::draw_track() {
   track_drawing = initial_image.clone();
+  cv::cvtColor(track_drawing, track_drawing, CV_GRAY2RGB);
   size_t num_features = feature_set.size();
   for (size_t i = 0; i < num_features; i++) {
     cv::Point2f direction = feature_set[i] - initial_features.at(feature_ids[i]);
     cv::arrowedLine(track_drawing, initial_features.at(feature_ids[i]),
-                    initial_features.at(feature_ids[i]) + direction, CV_RGB(255, 255, 255), 4);
+                    initial_features.at(feature_ids[i]) + direction, CV_RGB(0, 255, 0), 4);
   }
 }
 
 cv::Mat FeatureTracker::get_drawing() {
   if (track_drawing.empty()) {
     track_drawing = initial_image.clone();
+    cv::cvtColor(track_drawing, track_drawing, CV_GRAY2RGB);
   }
   return track_drawing;
 }

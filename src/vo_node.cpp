@@ -350,7 +350,7 @@ int main(int argc, char **argv) {
 
   ros::Publisher tracking_pub = n.advertise<sensor_msgs::Image>("/feature_tracking", 1);
   cv_bridge::CvImagePtr tracking_ptr = boost::make_shared<cv_bridge::CvImage>();
-  tracking_ptr->encoding = "mono8";
+  tracking_ptr->encoding = "rgb8";
 
   ros::Rate r(20);
   while (ros::ok()) {
