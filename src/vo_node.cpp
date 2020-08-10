@@ -150,7 +150,7 @@ class handle_images {
       // Detect features in left image
       vector<cv::Point2f> detected_features;
 
-      cv::goodFeaturesToTrack(left_ptr->image, detected_features, 300, 0.01, min_feature_distance);
+      cv::goodFeaturesToTrack(left_ptr->image, detected_features, 300, 0.1, min_feature_distance);
       if (detected_features.size() < 4) {
         return;
       }
@@ -292,6 +292,7 @@ class handle_images {
 
       bundle_adjuster->add_keyframe(new_keyframe);
 
+      feature_tracker->draw_track();
       feature_tracker->init(left_ptr->image, new_keyframe->features_2d, new_keyframe->feature_ids);
     }
 };
@@ -347,7 +348,7 @@ int main(int argc, char **argv) {
 
   //ros::Publisher marker_pub = n.advertise<visualization_msgs::Marker>("/vo/features", 1);
 
-  ros::Publisher tracking_pub = n.advertise<sensor_msgs::Image>("/vo/feature_tracking", 1);
+  ros::Publisher tracking_pub = n.advertise<sensor_msgs::Image>("/feature_tracking", 1);
   cv_bridge::CvImagePtr tracking_ptr = boost::make_shared<cv_bridge::CvImage>();
   tracking_ptr->encoding = "mono8";
 
@@ -394,7 +395,7 @@ int main(int argc, char **argv) {
       path_pub.publish(path);
 
       // Publish feature tracks
-      feature_tracker->draw_track(tracking_ptr->image);
+      tracking_ptr->image = feature_tracker->get_drawing();
       tracking_pub.publish(tracking_ptr->toImageMsg());
 
       /*
