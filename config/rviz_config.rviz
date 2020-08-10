@@ -141,7 +141,7 @@ Visualization Manager:
       Value: true
     - Class: rviz/Image
       Enabled: true
-      Image Topic: /vo/feature_tracking
+      Image Topic: /feature_tracking
       Max Value: 1
       Median window: 5
       Min Value: 0
