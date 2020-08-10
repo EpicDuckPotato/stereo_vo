@@ -23,7 +23,7 @@ void FeatureTracker::track_features(float &av_parallax, float &percent_lost, con
   cv::calcOpticalFlowPyrLK(last_image, image, feature_set, tracked_features, status1,
                            err, cv::Size(21, 21), 3,
                            cv::TermCriteria(cv::TermCriteria::COUNT+cv::TermCriteria::EPS, 30, 0.01),
-                           0, 1e-4);
+                           0, 1e-2);
 
   vector<uchar> status2;
   vector<cv::Point2f> reverse_track;
@@ -32,7 +32,7 @@ void FeatureTracker::track_features(float &av_parallax, float &percent_lost, con
     cv::calcOpticalFlowPyrLK(image, last_image, tracked_features, reverse_track, status2,
                              err, cv::Size(21, 21), 3,
                              cv::TermCriteria(cv::TermCriteria::COUNT+cv::TermCriteria::EPS, 30, 0.01),
-                             0, 1e-4);
+                             0, 1e-2);
   }
 
   feature_set.clear();
@@ -43,13 +43,18 @@ void FeatureTracker::track_features(float &av_parallax, float &percent_lost, con
     if (status1[i] && 
         (!flow_back || 
          (status2[i] && cv::norm(feature_set[i] - reverse_track[i]) < 2))) {
-      feature_set.push_back(tracked_features[i]);
-      feature_ids.push_back(feature_ids[i]);
-
       float dx = tracked_features[i].x - initial_features.at(feature_ids[i]).x;
       float dy = tracked_features[i].y - initial_features.at(feature_ids[i]).y;
 
-      av_parallax += sqrt(dx*dx + dy*dy);
+      float parallax = sqrt(dx*dx + dy*dy);
+  
+      if (parallax > 200) {
+        continue;
+      }
+
+      feature_set.push_back(tracked_features[i]);
+      feature_ids.push_back(feature_ids[i]);
+      av_parallax += parallax;
     }
   }
 
@@ -64,12 +69,19 @@ void FeatureTracker::get_tracked_features(vector<cv::Point2f> &features, vector<
   ids = feature_ids;
 }
 
-void FeatureTracker::draw_track(cv::Mat &track) {
-  track = initial_image.clone();
+void FeatureTracker::draw_track() {
+  track_drawing = initial_image.clone();
   size_t num_features = feature_set.size();
   for (size_t i = 0; i < num_features; i++) {
     cv::Point2f direction = feature_set[i] - initial_features.at(feature_ids[i]);
-    cv::arrowedLine(track, initial_features.at(feature_ids[i]),
+    cv::arrowedLine(track_drawing, initial_features.at(feature_ids[i]),
                     initial_features.at(feature_ids[i]) + direction, CV_RGB(255, 255, 255), 4);
   }
+}
+
+cv::Mat FeatureTracker::get_drawing() {
+  if (track_drawing.empty()) {
+    track_drawing = initial_image.clone();
+  }
+  return track_drawing;
 }

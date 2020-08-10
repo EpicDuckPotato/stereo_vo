@@ -42,13 +42,17 @@ class FeatureTracker {
     /*
      * draw_track: draws vectors at each feature location in the initial image, pointing
      *             to their location in the most recent image
-     * ARGUMENTS
-     * track: image with drawings
      */
-    void draw_track(cv::Mat &track);
+    void draw_track();
+
+    /*
+     * get_drawing: gets the most recent drawing created with draw_track
+     */
+    cv::Mat get_drawing();
 
   private:
     cv::Mat initial_image;
+    cv::Mat track_drawing;
     cv::Mat last_image;
     unordered_map<size_t, cv::Point2f> initial_features;
     vector<cv::Point2f> feature_set;
