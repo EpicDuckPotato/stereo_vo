@@ -1,5 +1,4 @@
 #include "bundle_adjuster.hpp"
-#include "reprojection_error.hpp"
 #include "reprojection_factor.hpp"
 #include "ceres/loss_function.h"
 
