@@ -19,11 +19,12 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   tf2_ros
   tf2_kdl
-  OpenCV
 )
 
 ## System dependencies are found with CMake's conventions
 find_package(Ceres REQUIRED)
+
+find_package(OpenCV REQUIRED)
 
 
 ## Uncomment this if the package has a setup.py. This macro ensures
@@ -146,7 +147,7 @@ add_library(bundle_adjustment OBJECT
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
 add_executable(vo_node src/vo_node.cpp $<TARGET_OBJECTS:bundle_adjustment>)
-target_link_libraries(vo_node ${catkin_LIBRARIES} ${CERES_LIBRARIES})
+target_link_libraries(vo_node ${catkin_LIBRARIES} ${OpenCV_LIBS} ${CERES_LIBRARIES})
 
 add_executable(kitti_node src/kitti_node.cpp)
 target_link_libraries(kitti_node ${catkin_LIBRARIES})
