@@ -1,3 +1,6 @@
+#ifndef FEATURE_TRACKER_H_
+#define FEATURE_TRACKER_H_
+
 #include <bundle_adjuster.hpp>
 #include <unordered_map>
 
@@ -58,3 +61,5 @@ class FeatureTracker {
     vector<cv::Point2f> feature_set;
     vector<size_t> feature_ids;
 };
+
+#endif

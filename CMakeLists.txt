@@ -135,6 +135,7 @@ include_directories(
 add_library(bundle_adjustment OBJECT
   ${CMAKE_CURRENT_SOURCE_DIR}/src/bundle_adjuster.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/feature_tracker.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/image_processor.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/reprojection_factor.cpp
 )
 
