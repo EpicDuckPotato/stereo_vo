@@ -1,0 +1,7 @@
+focal_length: 554.3826904296875
+cx: 320
+cy: 240
+baseline: 0.07
+left_topic: "/snake_r200/camera/ir/image_raw"
+right_topic: "/snake_r200/camera/ir2/image_raw"
+frame_rate: 30

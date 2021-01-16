@@ -1,0 +1,7 @@
+focal_length: 7.18856e+02
+cx: 6.071928e+02
+cy: 1.852157e+02
+baseline: 0.537165718864418
+left_topic: "/leftImage"
+right_topic: "/rightImage"
+frame_rate: 11

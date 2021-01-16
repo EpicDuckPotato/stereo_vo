@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(vo_practice)
+project(stereo_vo)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
@@ -19,11 +19,12 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   tf2_ros
   tf2_kdl
-  OpenCV
 )
 
 ## System dependencies are found with CMake's conventions
-# find_package(Boost REQUIRED COMPONENTS system)
+find_package(Ceres REQUIRED)
+
+find_package(OpenCV REQUIRED)
 
 
 ## Uncomment this if the package has a setup.py. This macro ensures
@@ -113,7 +114,7 @@ find_package(catkin REQUIRED COMPONENTS
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
 #  INCLUDE_DIRS include
-#  LIBRARIES vo_practice
+#  LIBRARIES stereo_vo
 #  CATKIN_DEPENDS cv_bridge geometry_msgs roscpp sensor_msgs std_msgs
 #  DEPENDS system_lib
 )
@@ -125,14 +126,18 @@ catkin_package(
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
 include_directories(
-# include
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${catkin_INCLUDE_DIRS}
+  ${CERES_INCLUDE_DIRS}
 )
 
 ## Declare a C++ library
-# add_library(${PROJECT_NAME}
-#   src/${PROJECT_NAME}/vo_practice.cpp
-# )
+add_library(bundle_adjustment OBJECT
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/bundle_adjuster.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/feature_tracker.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/image_processor.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/reprojection_factor.cpp
+)
 
 ## Add cmake target dependencies of the library
 ## as an example, code may need to be generated before libraries
@@ -142,8 +147,8 @@ include_directories(
 ## Declare a C++ executable
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
-add_executable(vo_node src/vo_node.cpp)
-target_link_libraries(vo_node ${catkin_LIBRARIES})
+add_executable(vo_node src/vo_node.cpp $<TARGET_OBJECTS:bundle_adjustment>)
+target_link_libraries(vo_node ${catkin_LIBRARIES} ${OpenCV_LIBS} ${CERES_LIBRARIES})
 
 add_executable(kitti_node src/kitti_node.cpp)
 target_link_libraries(kitti_node ${catkin_LIBRARIES})
@@ -210,7 +215,7 @@ target_link_libraries(kitti_node ${catkin_LIBRARIES})
 #############
 
 ## Add gtest based cpp test target and link libraries
-# catkin_add_gtest(${PROJECT_NAME}-test test/test_vo_practice.cpp)
+# catkin_add_gtest(${PROJECT_NAME}-test test/test_stereo_vo.cpp)
 # if(TARGET ${PROJECT_NAME}-test)
 #   target_link_libraries(${PROJECT_NAME}-test ${PROJECT_NAME})
 # endif()

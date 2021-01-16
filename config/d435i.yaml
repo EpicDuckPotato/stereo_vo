@@ -1,0 +1,7 @@
+focal_length: 385.7544860839844
+cx: 323.1204833984375
+cy: 236.7432098388672
+baseline: 0.05
+left_topic: "/camera/infra1/image_rect_raw"
+right_topic: "/camera/infra2/image_rect_raw"
+frame_rate: 30

@@ -1,3 +1,12 @@
 <launch>
-    <node name="rvizvisualisation" pkg="rviz" type="rviz" output="log" args="-d $(find vo_practice)/config/rviz_config.rviz" />
+    <arg name="config"/>
+    <arg name="use_sim_time" default="false"/>
+
+    <rosparam file="$(find stereo_vo)/config/$(arg config).yaml" />
+
+    <param name="use_sim_time" type="bool" value="$(arg use_sim_time)" />
+
+    <node name="rvizvisualisation" pkg="rviz" type="rviz" output="log" args="-d $(find stereo_vo)/config/rviz_config.rviz" />
+    
+    <node name="vo_node" pkg="stereo_vo" type="vo_node" output="screen"/>
 </launch>

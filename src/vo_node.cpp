@@ -16,7 +16,11 @@
 #include <geometry_msgs/Point.h>
 #include <nav_msgs/Path.h>
 #include <geometry_msgs/PoseStamped.h>
-#include <memory>
+#include "bundle_adjuster.hpp"
+#include "feature_tracker.hpp"
+#include "image_processor.hpp"
+#include <string>
+#include <queue>
 
 using namespace Eigen;
 using namespace std;
@@ -24,306 +28,137 @@ using namespace std;
 typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, 
                                                         sensor_msgs::Image> ApproxSyncPolicy;
 
-// Keyframe stored with its associated camera pose, 2d features, and 3d features
-struct Keyframe {
-  Vector3f position; // variable in bundle adjustment
-  Quaternionf orientation; // variable in bundle adjustment
-  cv::Mat image; // for optical flow
-  vector<cv::Point2f> features_2d; // for optical flow
-  vector<cv::Point3f> features_3d; // for PnP
+typedef function<void (const sensor_msgs::ImageConstPtr& left_msg, const sensor_msgs::ImageConstPtr& right_msg)> StereoImageHandler;
 
-  Keyframe(Vector3f position, Quaternionf orientation, cv::Mat image,
-           vector<cv::Point2f> features_2d, vector<cv::Point3f> features_3d) :
-           position(position), orientation(orientation), image(image),
-           features_2d(features_2d), features_3d(features_3d) {}
+static const float parallax_thresh = 20;
+static const float min_feature_distance = 30;
+static const size_t image_queue_size = 5;
+static const size_t sliding_window_size = 5;
+
+class handle_images {
+  private:
+    shared_ptr<queue<StereoPair>> image_queue;
+    double drop_time;
+
+  public:
+    /*
+     * handle_images: constructor
+     * ARGUMENTS
+     * image_queue: pointer to queue onto which we should push stereo pairs
+     * drop_time: what is the minimum interval between images that we care about?
+     */
+    handle_images(shared_ptr<queue<StereoPair>> image_queue,
+                  double drop_time) : image_queue(image_queue),
+                                      drop_time(drop_time) {}
+
+    /*
+     * operator (): as we get image pairs from ROS, we use them for processing only if features
+     * from the last keyframe have sufficient parallax with this pair's left image.
+     * If so, use previous keyframe's 3d feature positions to solve for current left
+     * camera pose via PnP
+     * ARGUMENTS
+     * left_msg: left image message
+     * right_msg: right image message
+     */
+    void operator () (const sensor_msgs::ImageConstPtr& left_msg,
+                      const sensor_msgs::ImageConstPtr& right_msg) { 
+      double time = left_msg->header.stamp.toSec();
+      if (!image_queue->empty() && time - image_queue->back().t < drop_time) {
+        return;
+      }
+
+      cv_bridge::CvImagePtr left_ptr = cv_bridge::toCvCopy(*left_msg, sensor_msgs::image_encodings::MONO8);
+      cv_bridge::CvImagePtr right_ptr = cv_bridge::toCvCopy(*right_msg, sensor_msgs::image_encodings::MONO8);
+
+      image_queue->push(StereoPair(left_ptr->image, right_ptr->image, time));
+    }
 };
-
-static cv::Mat left_pmat;
-static cv::Mat right_pmat;
-
-static cv::Mat rvec;
-static cv::Mat tvec;
-
-// KITTI sequence 00
-static const double focal_length = 7.18856e+02;
-static const double cx = 6.071928e+02;
-static const double cy = 1.852157e+02;
-static const double stereo_sep = 0.537165718864418;
-
-// KITTI sequence 03
-/*
-static const double focal_length = 7.215377000000e+02;
-static const double cx = 6.095593000000e+02;
-static const double cy = 1.728540000000e+02;
-static const double stereo_sep = 0.537150588250621;
-*/
-
-// KITTI sequence 13
-/*
-static const double focal_length = 7.188560000000e+02;
-static const double cx = 6.071928000000e+02;
-static const double cy = 1.852157000000e+02;
-static const double stereo_sep = 0.537165718864418;
-*/
-
-// Realsense d435i
-/*
-static const double focal_length = 385.7544860839844;
-static const double cx = 323.1204833984375;
-static const double cy = 236.7432098388672;
-static const double stereo_sep = 0.05;
-*/
-
-// Realsense r200 (in simulation, the left and right images seem identical?)
-/*
-static const double focal_length = 554.3826904296875;
-static const double cx = 320;
-static const double cy = 240;
-static const double stereo_sep = 0.07;
-*/
-
-// Multisense
-/*
-static const double focal_length = 476.7030836014194;
-static const double cx = 400.5;
-static const double cy = 400.5;
-static const double stereo_sep = 0.07;
-*/
-
-static shared_ptr<Keyframe> last_keyframe;
-static bool got_first_image = false;
-
-// Computes the 3d positions of the features. matched_features_2d
-// contains all features from left_features_2d that could be triangulated
-// REQUIRES: features_3d.size() == 0 && matched_features_2d.size() == 0
-void triangulate_stereo(vector<cv::Point3f>& features_3d,
-                        vector<cv::Point2f>& matched_features_2d,
-                        const vector<cv::Point2f>& left_features_2d,
-                        const cv::Mat& left,
-                        const cv::Mat& right) {
-
-  cv::Mat disparity;
-  cv::Ptr<cv::StereoBM> sbm = cv::StereoBM::create(16*3, 21);
-  sbm->compute(left, right, disparity);
-
-  // Show disparity
-  /*
-  double minVal, maxVal;
-  cv::minMaxLoc(disparity, &minVal, &maxVal);
-  cv::Mat disp_u;
-  disparity.convertTo(disp_u, CV_8UC1, 255/(maxVal - minVal));
-  cv::imshow("disp", disp_u);
-  cv::waitKey(0);
-  */
-
-  disparity.convertTo(disparity, CV_32F, 1.0/16);
-
-  size_t num_features = left_features_2d.size();
-
-  vector<cv::Point2f> right_features_2d;
-  for (size_t i = 0; i < num_features; i++) {
-    float disp = disparity.at<float>(left_features_2d[i].y,
-                                     left_features_2d[i].x);
-
-    if (disp > 0) {
-      matched_features_2d.push_back(left_features_2d[i]);
-      right_features_2d.push_back(left_features_2d[i] + cv::Point2f(disp, 0));
-    }
-  }
-
-  num_features = matched_features_2d.size();
-  cv::Mat points_homogeneous = cv::Mat::zeros(4, num_features, CV_32F);
-
-  cv::triangulatePoints(left_pmat, right_pmat, matched_features_2d, right_features_2d, points_homogeneous);
-
-  for (size_t i = 0; i < num_features; i++) {
-    points_homogeneous.colRange(i, i + 1) /= points_homogeneous.at<float>(3, i);
-    features_3d.push_back(cv::Point3f(points_homogeneous.at<float>(0, i),
-                                      points_homogeneous.at<float>(1, i),
-                                      points_homogeneous.at<float>(2, i)));
-  }
-}
-
-// As we get image pairs from ROS, we use them for processing only if features
-// from the last keyframe have sufficient parallax with this pair's left image.
-// If so, use previous keyframe's 3d feature positions to solve for current left
-// camera pose via PnP. Then get 2d and 3d feature positions for current pair
-// and push into queue
-void handle_images(const sensor_msgs::ImageConstPtr& left_msg,
-                   const sensor_msgs::ImageConstPtr& right_msg) { 
-  cv_bridge::CvImagePtr left_ptr = cv_bridge::toCvCopy(*left_msg, sensor_msgs::image_encodings::MONO8);
-  cv_bridge::CvImagePtr right_ptr = cv_bridge::toCvCopy(*right_msg, sensor_msgs::image_encodings::MONO8);
-
-  // Detect features in left image
-  vector<cv::KeyPoint> left_keypoints;
-  vector<cv::Point2f> left_features_2d;
-
-  // Images in Gazebo are especially noisy if you don't blur
-  /*
-  cv::GaussianBlur(left_ptr->image, left_ptr->image, cv::Size(3, 3), 1);
-  cv::GaussianBlur(right_ptr->image, right_ptr->image, cv::Size(3, 3), 1);
-  */
-  cv::FAST(left_ptr->image, left_keypoints, 40); // better for KITTI
-  //cv::FAST(left_ptr->image, left_keypoints, 10); // better for d435i in snake bags
-
-  if (left_keypoints.size() < 4) {
-    return;
-  }
-  cv::KeyPoint::convert(left_keypoints, left_features_2d);
-
-  // If you want to see features
-  /*
-  for (size_t i = 0; i < left_features_2d.size(); i++) {
-    cv::circle(left_ptr->image, left_features_2d[i], 3, cv::Scalar(0, 0, 255), cv::FILLED, cv::LINE_8);
-  }
-  cv::imshow("feat", left_ptr->image);
-  cv::waitKey(0);
-  */
-
-  // If we don't have any keyframes, make this the first one
-  if (!got_first_image) {
-    got_first_image = true;
-    vector<cv::Point3f> features_3d;
-    vector<cv::Point2f> matched_features_2d;
-    triangulate_stereo(features_3d, matched_features_2d,
-                       left_features_2d, left_ptr->image, right_ptr->image);
-
-    last_keyframe = make_shared<Keyframe>(Vector3f::Zero(),
-                                          Quaternionf::Identity(),
-                                          left_ptr->image,
-                                          matched_features_2d,
-                                          features_3d);
-
-    tvec = cv::Mat::zeros(3, 1, CV_32F);
-    rvec = cv::Mat::zeros(3, 1, CV_32F);
-
-    return;
-  }
-
-  // Track features between last keyframe and current frame
-  vector<uchar> status;
-  vector<float> err;
-  vector<cv::Point2f> tracked_features;
-  cv::calcOpticalFlowPyrLK(last_keyframe->image, left_ptr->image, last_keyframe->features_2d, tracked_features, status,
-                           err, cv::Size(21, 21), 3,
-                           cv::TermCriteria(cv::TermCriteria::COUNT+cv::TermCriteria::EPS, 30, 0.01),
-                           0, 1e-4);
-
-  vector<cv::Point2f> valid_tracked_features;
-  vector<cv::Point3f> valid_tracked_features_3d;
-
-  // If average parallax is less than 10 pixels, don't use this frame as a keyframe
-  float av_parallax;
-  size_t num_features = tracked_features.size();
-  for (size_t i = 0; i < num_features; i++) {
-    if (status[i]) {
-      valid_tracked_features.push_back(tracked_features[i]);
-      valid_tracked_features_3d.push_back(last_keyframe->features_3d[i]);
-
-      float dx = tracked_features[i].x - last_keyframe->features_2d[i].x;
-      float dy = tracked_features[i].y - last_keyframe->features_2d[i].y;
-      av_parallax += sqrt(dx*dx + dy*dy);
-    }
-  }
-
-  num_features = valid_tracked_features.size();
-  av_parallax /= num_features;
-
-  if (av_parallax <= 20) {
-    return;
-  }
-
-  // Allocate memory for new keyframe
-  shared_ptr<Keyframe> new_keyframe  = make_shared<Keyframe>(Vector3f::Zero(),
-                                                             Quaternionf::Identity(),
-                                                             left_ptr->image,
-                                                             vector<cv::Point2f>(),
-                                                             vector<cv::Point3f>());
-    
-  // Populate 3d features (used when processing next keyframe)
-  triangulate_stereo(new_keyframe->features_3d,
-                     new_keyframe->features_2d,
-                     left_features_2d,
-                     new_keyframe->image,
-                     right_ptr->image);
-
-  // Use PnP to get transform between last keyframe and this one
-  solvePnPRansac(valid_tracked_features_3d,
-                 valid_tracked_features,
-                 left_pmat.colRange(0, 3),
-                 cv::Mat::zeros(4, 1, CV_32F),
-                 rvec, tvec, true);
-
-  cv::Mat rmat;
-  cv::Rodrigues(rvec, rmat);
-  Matrix3f rmat_eigen;
-  Vector3f tvec_eigen;
-  cv::cv2eigen(rmat, rmat_eigen);
-  cv::cv2eigen(tvec, tvec_eigen);
-
-  // Get absolute pose from relative pose
-  new_keyframe->orientation = last_keyframe->orientation*rmat_eigen.transpose();
-  new_keyframe->position = last_keyframe->position - last_keyframe->orientation*rmat_eigen.transpose()*tvec_eigen;
-
-  last_keyframe = new_keyframe;
-}
 
 int main(int argc, char **argv) {
   ros::init(argc, argv, "vo_node");
   ros::NodeHandle n("~");
 
-  // KITTI topic
-  message_filters::Subscriber<sensor_msgs::Image> left_sub(n, "/leftImage", 3);
-  message_filters::Subscriber<sensor_msgs::Image> right_sub(n, "/rightImage", 3);
+  // Camera intrinsics
+  float focal_length;
+  float cx;
+  float cy;
+  float baseline;
 
-  // d435i topic
-  /*
-  message_filters::Subscriber<sensor_msgs::Image> left_sub(n, "/camera/infra1/image_rect_raw", 3);
-  message_filters::Subscriber<sensor_msgs::Image> right_sub(n, "/camera/infra2/image_rect_raw", 3);
-  */
+  // ROS info
+  string left_topic;
+  string right_topic;
+  int frame_rate;
 
-  // r200 topic
-  /*
-  message_filters::Subscriber<sensor_msgs::Image> left_sub(n, "/snake_r200/camera/ir/image_raw", 3);
-  message_filters::Subscriber<sensor_msgs::Image> right_sub(n, "/snake_r200/camera/ir2/image_raw", 3);
-  */
+  n.getParam("/focal_length", focal_length);
+  n.getParam("/cx", cx);
+  n.getParam("/cy", cy);
+  n.getParam("/baseline", baseline);
+  n.getParam("/left_topic", left_topic);
+  n.getParam("/right_topic", right_topic);
+  n.getParam("/frame_rate", frame_rate);
 
-  // multisense topic
-  /*
-  message_filters::Subscriber<sensor_msgs::Image> left_sub(n, "/multisense_sl/camera/left/image_raw", 3);
-  message_filters::Subscriber<sensor_msgs::Image> right_sub(n, "/multisense_sl/camera/right/image_raw", 3);
-  */
+  message_filters::Subscriber<sensor_msgs::Image> left_sub(n, left_topic, image_queue_size);
+  message_filters::Subscriber<sensor_msgs::Image> right_sub(n, right_topic, image_queue_size);
 
+  // Populate camera matrix with intrinsics
+  cv::Mat camera_matrix = cv::Mat::eye(3, 3, CV_32F);
+  camera_matrix.at<float>(0, 0) = focal_length;
+  camera_matrix.at<float>(0, 2) = cx;
+  camera_matrix.at<float>(1, 1) = focal_length;
+  camera_matrix.at<float>(1, 2) = cy;
+
+  CameraInfo info = {focal_length, cx, cy, 0, 0, 0, 0, baseline};
+
+  shared_ptr<BundleAdjuster> bundle_adjuster = make_shared<BundleAdjuster>(sliding_window_size, info);
+  shared_ptr<FeatureTracker> feature_tracker = make_shared<FeatureTracker>();
+  ImageProcessor image_processor(camera_matrix,
+                                 feature_tracker,
+                                 bundle_adjuster,
+                                 baseline,
+                                 min_feature_distance,
+                                 parallax_thresh);
+
+  // Synchronize subscribers to left and right images
   message_filters::Synchronizer<ApproxSyncPolicy> sync(ApproxSyncPolicy(10), left_sub, right_sub);
-  sync.registerCallback(boost::bind(&handle_images, _1, _2));
+  shared_ptr<queue<StereoPair>> image_queue = make_shared<queue<StereoPair>>();
+  StereoImageHandler image_handler = handle_images(image_queue, 0.05);
+  sync.registerCallback(bind(image_handler, _1, _2));
 
   tf2_ros::TransformBroadcaster br;
 
-  //ros::Publisher marker_pub = n.advertise<visualization_msgs::Marker>("features", 1);
   ros::Publisher path_pub = n.advertise<nav_msgs::Path>("/vo/path", 1);
   nav_msgs::Path path;
   path.header.frame_id = "world";
 
-  left_pmat = cv::Mat::eye(3, 4, CV_32F);
-  left_pmat.at<float>(0, 0) = focal_length;
-  left_pmat.at<float>(0, 2) = cx;
-  left_pmat.at<float>(1, 1) = focal_length;
-  left_pmat.at<float>(1, 2) = cy;
-  right_pmat = left_pmat.clone();
-  right_pmat.at<float>(0, 3) = focal_length*stereo_sep;
+  //ros::Publisher marker_pub = n.advertise<visualization_msgs::Marker>("/vo/features", 1);
+
+  ros::Publisher tracking_pub = n.advertise<sensor_msgs::Image>("/feature_tracking", 1);
+  cv_bridge::CvImagePtr tracking_ptr = boost::make_shared<cv_bridge::CvImage>();
+  tracking_ptr->encoding = "rgb8";
 
   ros::Rate r(20);
   while (ros::ok()) {
-    if (got_first_image) {
-      geometry_msgs::TransformStamped pose;
-      pose.transform.rotation.w = last_keyframe->orientation.w();
-      pose.transform.rotation.x = last_keyframe->orientation.x();
-      pose.transform.rotation.y = last_keyframe->orientation.y();
-      pose.transform.rotation.z = last_keyframe->orientation.z();
+    while (!image_queue->empty()) {
+      image_processor.process(image_queue->front());
+      image_queue->pop();
+    }
 
-      pose.transform.translation.x = last_keyframe->position(0);
-      pose.transform.translation.y = last_keyframe->position(1);
-      pose.transform.translation.z = last_keyframe->position(2);
+    if (bundle_adjuster->get_last_keyframe() != nullptr) {
+      bundle_adjuster->bundle_adjust();
+      shared_ptr<Keyframe> keyframe = bundle_adjuster->get_last_keyframe();
+      Quaternionf orientation = keyframe->orientation.conjugate();
+      Vector3f position = orientation*(-keyframe->position);
+
+      // Publish camera position to tf
+      geometry_msgs::TransformStamped pose;
+      pose.transform.rotation.w = orientation.w();
+      pose.transform.rotation.x = orientation.x();
+      pose.transform.rotation.y = orientation.y();
+      pose.transform.rotation.z = orientation.z();
+
+      pose.transform.translation.x = position(0);
+      pose.transform.translation.y = position(1);
+      pose.transform.translation.z = position(2);
 
       pose.header.stamp = ros::Time::now();
       pose.header.frame_id = "world";
@@ -331,15 +166,16 @@ int main(int argc, char **argv) {
 
       br.sendTransform(pose);
 
+      // Publish path
       geometry_msgs::PoseStamped gpose;
-      gpose.pose.orientation.w = last_keyframe->orientation.w();
-      gpose.pose.orientation.x = last_keyframe->orientation.x();
-      gpose.pose.orientation.y = last_keyframe->orientation.y();
-      gpose.pose.orientation.z = last_keyframe->orientation.z();
+      gpose.pose.orientation.w = orientation.w();
+      gpose.pose.orientation.x = orientation.x();
+      gpose.pose.orientation.y = orientation.y();
+      gpose.pose.orientation.z = orientation.z();
 
-      gpose.pose.position.x = last_keyframe->position(0);
-      gpose.pose.position.y = last_keyframe->position(1);
-      gpose.pose.position.z = last_keyframe->position(2);
+      gpose.pose.position.x = position(0);
+      gpose.pose.position.y = position(1);
+      gpose.pose.position.z = position(2);
 
       gpose.header.stamp = pose.header.stamp;
       gpose.header.frame_id = "vo_pose";
@@ -348,10 +184,13 @@ int main(int argc, char **argv) {
       path.header.stamp = gpose.header.stamp;
       path_pub.publish(path);
 
-      // For displaying features in rviz
+      // Publish feature tracks
+      tracking_ptr->image = feature_tracker->get_drawing();
+      tracking_pub.publish(tracking_ptr->toImageMsg());
+
       /*
+      // Display features in rviz
       visualization_msgs::Marker marker;
-      marker.header.stamp = pose.header.stamp;
       marker.header.frame_id = "world";
       marker.ns = "vo_node";
       marker.action = visualization_msgs::Marker::ADD;
@@ -367,8 +206,9 @@ int main(int argc, char **argv) {
       marker.scale.y = 0.2;
       marker.color.g = 1.0f;
       marker.color.a = 1.0;
+      marker.header.stamp = pose.header.stamp;
 
-      size_t num_features = last_keyframe->features_3d.size();
+      size_t num_features = keyframe->features_3d.size();
       for (size_t i = 0; i < num_features; ++i) {
         geometry_msgs::Point p;
         p.x = keyframe->features_3d[i].x;
