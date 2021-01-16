@@ -41,14 +41,15 @@ void ImageProcessor::process(const StereoPair &stereo_pair) {
     shared_ptr<Keyframe> new_keyframe = make_shared<Keyframe>(Vector3f::Zero(),
                                                               Quaternionf::Identity(),
                                                               stereo_pair.left,
+                                                              vector<cv::Point2f>(), // no tracked features
+                                                              vector<size_t>(), // no tracked features
                                                               valid_features_2d,
-                                                              features_3d,
-                                                              vector<size_t>());
+                                                              features_3d);
 
     bundle_adjuster->add_keyframe(new_keyframe);
 
-    feature_tracker->init(stereo_pair.left, valid_features_2d,
-                          new_keyframe->feature_ids);
+    feature_tracker->init(stereo_pair.left, new_keyframe->new_features_2d,
+                          new_keyframe->new_ids);
 
     tvec = cv::Mat::zeros(3, 1, CV_32F);
     rvec = cv::Mat::zeros(3, 1, CV_32F);
@@ -95,15 +96,15 @@ void ImageProcessor::process(const StereoPair &stereo_pair) {
                                                             orientation,
                                                             stereo_pair.left,
                                                             vector<cv::Point2f>(num_inliers),
-                                                            vector<cv::Point3f>(num_inliers),
-                                                            vector<size_t>(num_inliers));
+                                                            vector<size_t>(num_inliers),
+                                                            vector<cv::Point2f>(),
+                                                            vector<cv::Point3f>());
 
   // Populate new keyframe's features with inliers
   for (size_t i = 0; i < num_inliers; i++) {
     size_t idx = inlier_indices.at<int>(i, 0);
-    new_keyframe->feature_ids[i] = tracked_ids[idx];
-    new_keyframe->features_2d[i] = tracked_features[idx];
-    new_keyframe->features_3d[i] = tracked_world_points[idx];
+    new_keyframe->tracked_ids[i] = tracked_ids[idx];
+    new_keyframe->tracked_features_2d[i] = tracked_features[idx];
   }
 
   // Now we need to triangulate newly detected features. However, many of these
@@ -114,8 +115,8 @@ void ImageProcessor::process(const StereoPair &stereo_pair) {
   for (size_t i = 0; i < num_features; i++) {
     bool tracked = false;
     for (size_t j = 0; j < num_inliers; j++) {
-      float dx = detected_features[i].x - new_keyframe->features_2d[j].x;
-      float dy = detected_features[i].y - new_keyframe->features_2d[j].y;
+      float dx = detected_features[i].x - new_keyframe->tracked_features_2d[j].x;
+      float dy = detected_features[i].y - new_keyframe->tracked_features_2d[j].y;
       if (sqrt(dx*dx + dy*dy) < min_feature_distance) {
         tracked = true;
         break;
@@ -126,9 +127,6 @@ void ImageProcessor::process(const StereoPair &stereo_pair) {
     }
   }
 
-  vector<cv::Point3f> new_features_3d;
-  vector<cv::Point2f> valid_new_features;
-
   cv::Mat hmat = cv::Mat::eye(4, 4, CV_32F);
   cv::Mat tmp = rmat.t();
   tmp.copyTo(hmat(cv::Rect(0, 0, 3, 3)));
@@ -136,25 +134,32 @@ void ImageProcessor::process(const StereoPair &stereo_pair) {
   tmp.copyTo(hmat(cv::Rect(3, 0, 1, 3)));
 
   // Triangulate 3d points for detected features
-  triangulate_stereo(new_features_3d,
-                     valid_new_features,
+  triangulate_stereo(new_keyframe->new_features_3d,
+                     new_keyframe->new_features_2d,
                      new_features,
                      stereo_pair.left,
                      stereo_pair.right,
                      hmat);
 
-  new_keyframe->features_2d.insert(new_keyframe->features_2d.end(), 
-                                   make_move_iterator(valid_new_features.begin()),
-                                   make_move_iterator(valid_new_features.end()));
-
-  new_keyframe->features_3d.insert(new_keyframe->features_3d.end(), 
-                                   make_move_iterator(new_features_3d.begin()),
-                                   make_move_iterator(new_features_3d.end()));
-
   bundle_adjuster->add_keyframe(new_keyframe);
 
   feature_tracker->draw_track();
-  feature_tracker->init(stereo_pair.left, new_keyframe->features_2d, new_keyframe->feature_ids);
+
+  vector<cv::Point2f> features_2d_for_tracker;
+  vector<size_t> ids_for_tracker;
+  features_2d_for_tracker.insert(features_2d_for_tracker.end(),
+                        new_keyframe->tracked_features_2d.begin(),
+                        new_keyframe->tracked_features_2d.end());
+  features_2d_for_tracker.insert(features_2d_for_tracker.end(),
+                        new_keyframe->new_features_2d.begin(),
+                        new_keyframe->new_features_2d.end());
+  ids_for_tracker.insert(ids_for_tracker.end(),
+                         new_keyframe->tracked_ids.begin(),
+                         new_keyframe->tracked_ids.end());
+  ids_for_tracker.insert(ids_for_tracker.end(),
+                         new_keyframe->new_ids.begin(),
+                         new_keyframe->new_ids.end());
+  feature_tracker->init(stereo_pair.left, features_2d_for_tracker, ids_for_tracker);
 }
 
 void ImageProcessor::triangulate_stereo(vector<cv::Point3f>& features_3d,

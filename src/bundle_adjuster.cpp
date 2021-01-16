@@ -58,12 +58,6 @@ void BundleAdjuster::remove_oldest_pose() {
 }
 
 void BundleAdjuster::add_keyframe(shared_ptr<Keyframe> keyframe) {
-  // How many features in this keyframe did we track from the previous one?
-  size_t num_tracked = keyframe->feature_ids.size();
-
-  // How many features in the keyframe total?
-  size_t num_features = keyframe->features_2d.size();
-
   shared_ptr<PoseVariable> pose_var = make_shared<PoseVariable>(); 
 
   pose_var->pose[0] = keyframe->orientation.w();
@@ -75,38 +69,51 @@ void BundleAdjuster::add_keyframe(shared_ptr<Keyframe> keyframe) {
   pose_var->pose[5] = keyframe->position(1);
   pose_var->pose[6] = keyframe->position(2);
 
-  for (size_t i = 0; i < num_features && i < max_features; i++) {
+  size_t num_tracked = keyframe->tracked_ids.size();
+  for (size_t i = 0; i < num_tracked; ++i) {
+    cv::Point2f feature = keyframe->tracked_features_2d[i];
+    ReprojectionFactor *cost_func = new ReprojectionFactor(feature.x, feature.y, camera_info);
+    size_t feature_id = keyframe->tracked_ids[i];
+    features[feature_id].refcount++;
+    pose_var->observations.push_back(make_pair(problem->AddResidualBlock(cost_func,
+                                                                         NULL /* squared loss */,
+                                                                         pose_var->pose,
+                                                                         features[feature_id].position),
+                                                                         feature_id));
+  }
+
+  size_t max_new = max_features - num_tracked;
+  if (keyframe->new_features_2d.size() > max_new) {
+    keyframe->new_features_2d.resize(max_new);
+    keyframe->new_features_3d.resize(max_new);
+    keyframe->new_ids.resize(max_new);
+  }
+
+  size_t num_new = keyframe->new_features_2d.size();
+  for (size_t i = 0; i < num_new; ++i) {
     // Add a residual block for the keyframe's observation of this feature
-    cv::Point2f feature = keyframe->features_2d[i];
+    cv::Point2f feature = keyframe->new_features_2d[i];
     ReprojectionFactor *cost_func = new ReprojectionFactor(feature.x, feature.y, camera_info);
 
     size_t feature_id;
-    if (i < num_tracked) {
-      // Feature is already in the list
-      feature_id = keyframe->feature_ids[i];
+    if (avail_ids.size() > 0) {
+      // We have empty positions in the list
+      feature_id = avail_ids.top(); 
+      avail_ids.pop(); 
     } else {
-      // Feature isn't in the list, so add it to the list
-
-      if (avail_ids.size() > 0) {
-        // We have empty positions in the list
-        feature_id = avail_ids.top(); 
-        avail_ids.pop(); 
-      } else {
-        // We need to expand the list
-        features.push_back(Feature());
-        feature_id = features.size() - 1;
-      }
-
-      features[feature_id].position = new double[3];
-      features[feature_id].position[0] = keyframe->features_3d[i].x;
-      features[feature_id].position[1] = keyframe->features_3d[i].y;
-      features[feature_id].position[2] = keyframe->features_3d[i].z;
-      features[feature_id].refcount = 0;
-
-      keyframe->feature_ids.push_back(feature_id);
+      // We need to expand the list
+      features.push_back(Feature());
+      feature_id = features.size() - 1;
     }
-    features[feature_id].refcount++;
 
+    features[feature_id].position = new double[3];
+    features[feature_id].position[0] = keyframe->new_features_3d[i].x;
+    features[feature_id].position[1] = keyframe->new_features_3d[i].y;
+    features[feature_id].position[2] = keyframe->new_features_3d[i].z;
+    features[feature_id].refcount = 1;
+
+    keyframe->new_ids.push_back(feature_id);
+    features[feature_id].refcount++;
     pose_var->observations.push_back(make_pair(problem->AddResidualBlock(cost_func,
                                                                          NULL /* squared loss */,
                                                                          pose_var->pose,
@@ -114,9 +121,6 @@ void BundleAdjuster::add_keyframe(shared_ptr<Keyframe> keyframe) {
                                                                          feature_id));
   }
   problem->SetParameterization(pose_var->pose, se3param.get());
-
-  keyframe->features_2d.resize(keyframe->feature_ids.size());
-  keyframe->features_3d.resize(keyframe->feature_ids.size());
 
   pose_window.push(pose_var);
   if (pose_window.size() > window_size) {
@@ -148,13 +152,6 @@ void BundleAdjuster::bundle_adjust() {
     last_keyframe->position(1) = pose_var->pose[5];
     last_keyframe->position(2) = pose_var->pose[6];
     
-    size_t visible_features = last_keyframe->feature_ids.size();
-    for (size_t i = 0; i < visible_features; i++) {
-      size_t id = last_keyframe->feature_ids[i];
-      last_keyframe->features_3d[i].x = features[id].position[0];
-      last_keyframe->features_3d[i].y = features[id].position[1];
-      last_keyframe->features_3d[i].z = features[id].position[2];
-    }
     new_frame_added = false;
   }
 }

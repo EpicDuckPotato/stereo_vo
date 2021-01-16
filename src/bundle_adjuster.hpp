@@ -15,8 +15,7 @@ using namespace Eigen;
 /*
  * Keyframe: stores the position and orientation of the world frame
  * with respect to the camera frame for a keyframe, as well as the 
- * keyframe's associated image, 2d features, 3d features (whose indices
- * correspond with their 2d counterparts' in features_2d), and
+ * keyframe's associated image, 2d features, 3d features, and
  * feature ids, which are used to identify features as they
  * are tracked across multiple frames
  */
@@ -24,22 +23,26 @@ struct Keyframe {
   Vector3f position; 
   Quaternionf orientation; 
   cv::Mat image; 
-  vector<cv::Point2f> features_2d; 
-  vector<cv::Point3f> features_3d;
-  vector<size_t> feature_ids;
+  vector<cv::Point2f> tracked_features_2d; 
+  vector<size_t> tracked_ids;
+  vector<cv::Point2f> new_features_2d; 
+  vector<cv::Point3f> new_features_3d;
+  vector<size_t> new_ids; 
 
   Keyframe(Vector3f position, 
            Quaternionf orientation,
            cv::Mat image,
-           vector<cv::Point2f> features_2d,
-           vector<cv::Point3f> features_3d,
-           vector<size_t> feature_ids) : 
+           vector<cv::Point2f> tracked_features_2d,
+           vector<size_t> tracked_ids,
+           vector<cv::Point2f> new_features_2d,
+           vector<cv::Point3f> new_features_3d) : 
            position(position),
            orientation(orientation),
            image(image),
-           features_2d(features_2d),
-           features_3d(features_3d),
-           feature_ids(feature_ids) {}
+           tracked_features_2d(tracked_features_2d),
+           tracked_ids(tracked_ids),
+           new_features_2d(new_features_2d),
+           new_features_3d(new_features_3d) {}
 };
 
 // A variable representing a keyframe's camera pose in the factor graph 
@@ -99,11 +102,9 @@ class BundleAdjuster
 
     /*
      * add_keyframe: adds a keyframe to the bundle adjustment window, and removes an old
-     * keyframe if there are too many. If there are more observations in
-     * keyframe->features_2d than get_last_keyframe()->features_2d, these are added to the feature list.
-     * Any features whose indices exceed max_features are discarded
-     * After this function returns, calls to get_last_keyframe() will return a
-     * pointer to this keyframe.
+     * keyframe if there are too many. Gives ids to new features, and throws out new
+     * features that push us over the feature limit. After this function returns,
+     * calls to get_last_keyframe() will return a pointer to this keyframe.
      * ARGUMENTS
      * keyframe: pointer to the keyframe to add
      */
@@ -111,8 +112,8 @@ class BundleAdjuster
 
     /*
      * bundle_adjust: performs optimization over all keyframes in the window and
-     * updates the position and orientation of the last keyframe. Any subsequent calls
-     * to get_last_keyframe will reflect the optimization
+     * updates the position and orientation of the last keyframe (not new_features_3d, though.
+     * If you want updated 3d feature positions, call get_world_points)
      */
     void bundle_adjust();
 
