@@ -109,8 +109,8 @@ int main(int argc, char **argv) {
 
   CameraInfo info = {focal_length, cx, cy, 0, 0, 0, 0, baseline};
 
-  shared_ptr<BundleAdjuster> bundle_adjuster = make_shared<BundleAdjuster>(sliding_window_size, info);
-  shared_ptr<FeatureTracker> feature_tracker = make_shared<FeatureTracker>();
+  std::shared_ptr<BundleAdjuster> bundle_adjuster = std::make_shared<BundleAdjuster>(sliding_window_size, info);
+  std::shared_ptr<FeatureTracker> feature_tracker = std::make_shared<FeatureTracker>();
   ImageProcessor image_processor(camera_matrix,
                                  feature_tracker,
                                  bundle_adjuster,
@@ -120,7 +120,7 @@ int main(int argc, char **argv) {
 
   // Synchronize subscribers to left and right images
   message_filters::Synchronizer<ApproxSyncPolicy> sync(ApproxSyncPolicy(10), left_sub, right_sub);
-  shared_ptr<queue<StereoPair>> image_queue = make_shared<queue<StereoPair>>();
+  std::shared_ptr<queue<StereoPair>> image_queue = std::make_shared<queue<StereoPair>>();
   StereoImageHandler image_handler = handle_images(image_queue, 0.05);
   sync.registerCallback(bind(image_handler, _1, _2));
 
@@ -143,11 +143,11 @@ int main(int argc, char **argv) {
       image_queue->pop();
     }
 
-    if (bundle_adjuster->get_last_keyframe() != nullptr) {
+    if (bundle_adjuster->any_keyframes()) {
       bundle_adjuster->bundle_adjust();
-      shared_ptr<Keyframe> keyframe = bundle_adjuster->get_last_keyframe();
-      Quaternionf orientation = keyframe->orientation.conjugate();
-      Vector3f position = orientation*(-keyframe->position);
+      Quaterniond orientation;
+      Vector3d position;
+      bundle_adjuster->get_last_pose(position, orientation);
 
       // Publish camera position to tf
       geometry_msgs::TransformStamped pose;

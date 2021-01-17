@@ -15,10 +15,10 @@ class FeatureTracker {
      * ARGUMENTS
      * image: image containing features
      * features: features to track
-     * ids: ids points corresponding to features to track
+     * keys: keys points corresponding to features to track
      */
     void init(const cv::Mat &image, const vector<cv::Point2f> &features,
-              const vector<size_t> &ids);
+              const vector<Key> &keys);
 
     /*
      * track_features: finds the coordinates of the feature set being tracked
@@ -35,12 +35,12 @@ class FeatureTracker {
 
     /* 
      * get_tracked_features: gets the current 2d positions of the tracked feature
-     *                       set and their associated ids
+     *                       set and their associated keys
      * ARGUMENTS
      * features: populated with 2d positions of current feature set
-     * ids: populated with ids of current feature set
+     * keys: populated with keys of current feature set
      */
-    void get_tracked_features(vector<cv::Point2f> &features, vector<size_t> &ids);
+    void get_tracked_features(vector<cv::Point2f> &features, vector<Key> &keys);
 
     /*
      * draw_track: draws vectors at each feature location in the initial image, pointing
@@ -57,9 +57,9 @@ class FeatureTracker {
     cv::Mat initial_image;
     cv::Mat track_drawing;
     cv::Mat last_image;
-    unordered_map<size_t, cv::Point2f> initial_features;
+    unordered_map<Key, cv::Point2f> initial_features;
     vector<cv::Point2f> feature_set;
-    vector<size_t> feature_ids;
+    vector<Key> feature_keys;
 };
 
 #endif

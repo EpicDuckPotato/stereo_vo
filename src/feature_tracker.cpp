@@ -1,14 +1,14 @@
 #include "feature_tracker.hpp"
 
 void FeatureTracker::init(const cv::Mat &image, const vector<cv::Point2f> &features,
-                          const vector<size_t> &ids) {
-  feature_ids = ids;
+                          const vector<Key> &keys) {
+  feature_keys = keys;
   feature_set = features;
 
-  size_t num_features = ids.size();
+  size_t num_features = keys.size();
   initial_features.clear();
   for (size_t i = 0; i < num_features; i++) { 
-    initial_features.insert(make_pair(ids[i], features[i])); 
+    initial_features.insert(make_pair(keys[i], features[i])); 
   }
 
   last_image = image.clone();
@@ -36,15 +36,15 @@ void FeatureTracker::track_features(float &av_parallax, float &percent_lost, con
   }
 
   feature_set.clear();
-  feature_ids.clear();
+  feature_keys.clear();
   av_parallax = 0;
   size_t num_features = tracked_features.size();
   for (size_t i = 0; i < num_features; i++) {
     if (status1[i] && 
         (!flow_back || 
          (status2[i] && cv::norm(feature_set[i] - reverse_track[i]) < 2))) {
-      float dx = tracked_features[i].x - initial_features.at(feature_ids[i]).x;
-      float dy = tracked_features[i].y - initial_features.at(feature_ids[i]).y;
+      float dx = tracked_features[i].x - initial_features.at(feature_keys[i]).x;
+      float dy = tracked_features[i].y - initial_features.at(feature_keys[i]).y;
 
       float parallax = sqrt(dx*dx + dy*dy);
   
@@ -53,7 +53,7 @@ void FeatureTracker::track_features(float &av_parallax, float &percent_lost, con
       }
 
       feature_set.push_back(tracked_features[i]);
-      feature_ids.push_back(feature_ids[i]);
+      feature_keys.push_back(feature_keys[i]);
       av_parallax += parallax;
     }
   }
@@ -64,9 +64,9 @@ void FeatureTracker::track_features(float &av_parallax, float &percent_lost, con
   last_image = image.clone();
 }
 
-void FeatureTracker::get_tracked_features(vector<cv::Point2f> &features, vector<size_t> &ids) {
+void FeatureTracker::get_tracked_features(vector<cv::Point2f> &features, vector<Key> &keys) {
   features = feature_set;
-  ids = feature_ids;
+  keys = feature_keys;
 }
 
 void FeatureTracker::draw_track() {
@@ -74,9 +74,9 @@ void FeatureTracker::draw_track() {
   cv::cvtColor(track_drawing, track_drawing, CV_GRAY2RGB);
   size_t num_features = feature_set.size();
   for (size_t i = 0; i < num_features; i++) {
-    cv::Point2f direction = feature_set[i] - initial_features.at(feature_ids[i]);
-    cv::arrowedLine(track_drawing, initial_features.at(feature_ids[i]),
-                    initial_features.at(feature_ids[i]) + direction, CV_RGB(0, 255, 0), 4);
+    cv::Point2f direction = feature_set[i] - initial_features.at(feature_keys[i]);
+    cv::arrowedLine(track_drawing, initial_features.at(feature_keys[i]),
+                    initial_features.at(feature_keys[i]) + direction, CV_RGB(0, 255, 0), 4);
   }
 }
 

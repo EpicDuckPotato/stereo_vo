@@ -22,10 +22,8 @@ find_package(catkin REQUIRED COMPONENTS
 )
 
 ## System dependencies are found with CMake's conventions
-find_package(Ceres REQUIRED)
-
+find_package(GTSAM REQUIRED)
 find_package(OpenCV REQUIRED)
-
 
 ## Uncomment this if the package has a setup.py. This macro ensures
 ## modules and global scripts declared therein get installed
@@ -129,6 +127,7 @@ include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${catkin_INCLUDE_DIRS}
   ${CERES_INCLUDE_DIRS}
+  ${GTSAM_INCLUDE_DIR}
 )
 
 ## Declare a C++ library
@@ -136,7 +135,6 @@ add_library(bundle_adjustment OBJECT
   ${CMAKE_CURRENT_SOURCE_DIR}/src/bundle_adjuster.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/feature_tracker.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/image_processor.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/reprojection_factor.cpp
 )
 
 ## Add cmake target dependencies of the library
@@ -148,7 +146,7 @@ add_library(bundle_adjustment OBJECT
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
 add_executable(vo_node src/vo_node.cpp $<TARGET_OBJECTS:bundle_adjustment>)
-target_link_libraries(vo_node ${catkin_LIBRARIES} ${OpenCV_LIBS} ${CERES_LIBRARIES})
+target_link_libraries(vo_node ${catkin_LIBRARIES} ${OpenCV_LIBS} ${CERES_LIBRARIES} gtsam gtsam_unstable)
 
 add_executable(kitti_node src/kitti_node.cpp)
 target_link_libraries(kitti_node ${catkin_LIBRARIES})

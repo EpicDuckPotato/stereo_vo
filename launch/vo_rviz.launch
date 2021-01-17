@@ -8,5 +8,5 @@
 
     <node name="rvizvisualisation" pkg="rviz" type="rviz" output="log" args="-d $(find stereo_vo)/config/rviz_config.rviz" />
     
-    <node name="vo_node" pkg="stereo_vo" type="vo_node" output="screen"/>
+    <node name="vo_node" pkg="stereo_vo" type="vo_node" output="screen" launch-prefix="gdb -ex run --args"/>
 </launch>

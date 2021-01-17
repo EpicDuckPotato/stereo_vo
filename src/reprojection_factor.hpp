@@ -1,4 +1,3 @@
-#include <ceres/ceres.h>
 #include "camera_info.hpp"
 #include <Eigen/Dense>
 
