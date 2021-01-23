@@ -122,9 +122,7 @@ class BundleAdjuster
 
     bool new_frame_added;
     bool any_frames;
-
-    Vector3d last_position;
-    Quaterniond last_orientation;
+    bool optimized;
 };
 
 #endif
