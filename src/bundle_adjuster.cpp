@@ -43,8 +43,8 @@ void BundleAdjuster::add_keyframe(Keyframe &keyframe) {
   for (size_t i = 0; i < num_tracked; ++i) {
     Point2 feature(keyframe.tracked_features_2d[i].x, keyframe.tracked_features_2d[i].y);
     Key feature_key = keyframe.tracked_keys[i];
-    newFactors.push_back(GenericProjectionFactor<Pose3, Point3, Cal3Unified>(feature, measurementNoise,
-                                                                             pose_key, feature_key, K));
+    newFactors.add(GenericProjectionFactor<Pose3, Point3, Cal3Unified>(feature, measurementNoise,
+                                                                       pose_key, feature_key, K));
     newTimestamps[feature_key] = keyframe.timestamp;
   }
 
@@ -60,8 +60,8 @@ void BundleAdjuster::add_keyframe(Keyframe &keyframe) {
     Point2 feature(keyframe.new_features_2d[i].x, keyframe.new_features_2d[i].y);
     Key feature_key = next_key++;
     keyframe.new_keys.push_back(feature_key);
-    newFactors.push_back(GenericProjectionFactor<Pose3, Point3, Cal3Unified>(feature, measurementNoise,
-                                                                             pose_key, feature_key, K));
+    newFactors.add(GenericProjectionFactor<Pose3, Point3, Cal3Unified>(feature, measurementNoise,
+                                                                       pose_key, feature_key, K));
     Point3 feature_3d(keyframe.new_features_3d[i].x,
                       keyframe.new_features_3d[i].y,
                       keyframe.new_features_3d[i].z);
@@ -69,9 +69,7 @@ void BundleAdjuster::add_keyframe(Keyframe &keyframe) {
     newValues.insert(feature_key, feature_3d);
   }
 
-  if (any_frames) {
-    new_frame_added = true;
-  }
+  new_frame_added = true;
   any_frames = true;
 }
 
