@@ -35,6 +35,8 @@ void FeatureTracker::track_features(float &av_parallax, float &percent_lost, con
                              0, 1e-2);
   }
 
+  vector<cv::Point2f> old_feature_set(feature_set);
+  vector<size_t> old_feature_ids(feature_ids);
   feature_set.clear();
   feature_ids.clear();
   av_parallax = 0;
@@ -42,9 +44,9 @@ void FeatureTracker::track_features(float &av_parallax, float &percent_lost, con
   for (size_t i = 0; i < num_features; i++) {
     if (status1[i] && 
         (!flow_back || 
-         (status2[i] && cv::norm(feature_set[i] - reverse_track[i]) < 2))) {
-      float dx = tracked_features[i].x - initial_features.at(feature_ids[i]).x;
-      float dy = tracked_features[i].y - initial_features.at(feature_ids[i]).y;
+         (status2[i] && cv::norm(old_feature_set[i] - reverse_track[i]) < 2))) {
+      float dx = tracked_features[i].x - initial_features.at(old_feature_ids[i]).x;
+      float dy = tracked_features[i].y - initial_features.at(old_feature_ids[i]).y;
 
       float parallax = sqrt(dx*dx + dy*dy);
   
