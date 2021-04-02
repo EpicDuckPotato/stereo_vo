@@ -1,11 +1,12 @@
 #include "bundle_adjuster.hpp"
 #include <gtsam/slam/ProjectionFactor.h>
+#include <gtsam/slam/PriorFactor.h>
 
 BundleAdjuster::BundleAdjuster(double lag, CameraInfo info) : smoother(lag) {
   Pose3 priorMean; // Initialize first pose at the origin
   noiseModel::Isotropic::shared_ptr priorNoise = noiseModel::Isotropic::Sigma(6, 0.05);
   Key priorKey = 0;
-  newFactors.addPrior(priorKey, priorMean, priorNoise);
+  newFactors.push_back(PriorFactor<Pose3>(priorKey, priorMean, priorNoise));
   newValues.insert(priorKey, priorMean); 
   newTimestamps[priorKey] = 0.0; 
 
